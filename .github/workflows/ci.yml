@@ -1,0 +1,462 @@
+# Golem - CI Gate
+# Triggers on PR create/update and push to main
+#
+# Gate checks (Rust):
+# 1. Rust format check - cargo fmt
+# 2. Rust Clippy - code style + compile check
+# 3. Rust unit tests - cargo test + coverage
+# 4. Frontend type check + tests + coverage
+# 5. Security check - hardcoded secrets + dependency audit
+
+name: CI Gate
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_VERSION: '1.88'
+
+jobs:
+  # ==================== Rust Format Check ====================
+  rust-fmt:
+    name: Rust Format Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust ${{ env.RUST_VERSION }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt
+
+      - name: Run cargo fmt
+        run: cargo fmt --all -- --check
+
+  # ==================== Rust Clippy ====================
+  rust-clippy:
+    name: Rust Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust ${{ env.RUST_VERSION }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          key: "v2-clippy"
+
+      - name: Run cargo clippy
+        run: cargo clippy -p golem-core -p golem-cli -p golem-daemon --all-targets -- -D warnings
+
+  # ==================== Rust Unit Tests ====================
+  rust-test:
+    name: Rust Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust ${{ env.RUST_VERSION }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          key: "v2-test"
+
+      - name: Run cargo test
+        run: cargo test -p golem-core
+
+      - name: Install cargo-llvm-cov
+        run: |
+          rustup component add llvm-tools-preview
+          cargo install cargo-llvm-cov --locked
+
+      - name: Run test coverage
+        run: |
+          mkdir -p coverage
+          cargo llvm-cov -p golem-core --cobertura --output-path coverage/cobertura.xml
+
+      - name: Generate coverage summary
+        if: always()
+        run: |
+          SUMMARY_FILE="rust-coverage-summary.md"
+          echo "## Rust Test Coverage" > "$SUMMARY_FILE"
+          echo "" >> "$SUMMARY_FILE"
+          if [ -f coverage/cobertura.xml ]; then
+            python3 -c "
+          import xml.etree.ElementTree as ET
+          tree = ET.parse('coverage/cobertura.xml')
+          root = tree.getroot()
+          rate = float(root.attrib.get('line-rate', 0)) * 100
+          branch_rate = float(root.attrib.get('branch-rate', 0)) * 100
+          print(f'| Metric | Coverage |')
+          print(f'|--------|----------|')
+          print(f'| Line coverage | {rate:.1f}% |')
+          print(f'| Branch coverage | {branch_rate:.1f}% |')
+          print()
+          print('| Module | Line Coverage |')
+          print('|--------|--------------|')
+          for pkg in root.findall('.//package'):
+              name = pkg.attrib.get('name', 'unknown')
+              pkg_rate = float(pkg.attrib.get('line-rate', 0)) * 100
+              bar_len = int(pkg_rate / 5)
+              bar = '█' * bar_len + '░' * (20 - bar_len)
+              print(f'| {name} | {bar} {pkg_rate:.1f}% |')
+          " >> "$SUMMARY_FILE"
+            echo "" >> "$SUMMARY_FILE"
+            echo "> See Rust coverage artifact for details" >> "$SUMMARY_FILE"
+          else
+            echo "> No coverage report generated" >> "$SUMMARY_FILE"
+            echo "::error::Coverage report generation failed: cobertura.xml not generated"
+            exit 1
+          fi
+          echo "" >> "$SUMMARY_FILE"
+          cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage summary
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-coverage-summary
+          path: rust-coverage-summary.md
+          retention-days: 1
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-coverage
+          path: coverage/
+          retention-days: 14
+
+  # ==================== Frontend Tests + Coverage ====================
+  frontend-test:
+    name: Frontend Tests & Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "10"
+
+      - name: Install dependencies
+        working-directory: electron-app
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeScript type check
+        working-directory: electron-app
+        run: pnpm typecheck
+
+      - name: Run frontend tests + coverage
+        working-directory: electron-app
+        run: pnpm vitest run --coverage --coverage.reporter=json-summary --coverage.reporter=text
+
+      - name: Generate frontend coverage summary
+        if: always()
+        working-directory: electron-app
+        run: |
+          SUMMARY_FILE="frontend-coverage-summary.md"
+          echo "## Frontend Test Coverage" > "$SUMMARY_FILE"
+          echo "" >> "$SUMMARY_FILE"
+          if [ -f coverage/coverage-summary.json ]; then
+            node -e "
+              const fs = require('fs');
+              const data = JSON.parse(fs.readFileSync('coverage/coverage-summary.json', 'utf8'));
+              const total = data.total;
+              if (!total || total.lines === undefined) {
+                console.error('No total coverage data found');
+                process.exit(1);
+              }
+              const lines = total.lines.pct.toFixed(1);
+              const branches = total.branches.pct.toFixed(1);
+              const functions = total.functions.pct.toFixed(1);
+              const statements = total.statements.pct.toFixed(1);
+              const barLen = Math.round(total.lines.pct / 5);
+              const bar = '█'.repeat(barLen) + '░'.repeat(20 - barLen);
+              console.log('| Metric | Coverage |');
+              console.log('|--------|----------|');
+              console.log('| Line coverage | ' + bar + ' ' + lines + '% |');
+              console.log('| Branch coverage | ' + branches + '% |');
+              console.log('| Function coverage | ' + functions + '% |');
+              console.log('| Statement coverage | ' + statements + '% |');
+              console.log();
+              console.log('| File | Line Coverage |');
+              console.log('|------|--------------|');
+              for (const [file, fileData] of Object.entries(data)) {
+                if (file === 'total') continue;
+                const fileLines = fileData.lines.pct.toFixed(1);
+                const fileBarLen = Math.round(fileData.lines.pct / 5);
+                const fileBar = '█'.repeat(fileBarLen) + '░'.repeat(20 - fileBarLen);
+                const shortPath = file.replace(/^.*src\\//, 'src/');
+                console.log('| ' + shortPath + ' | ' + fileBar + ' ' + fileLines + '% |');
+              }
+            " >> "$SUMMARY_FILE"
+            echo "" >> "$SUMMARY_FILE"
+            echo "> See frontend coverage artifact for details" >> "$SUMMARY_FILE"
+            cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "> No frontend coverage report generated" >> "$SUMMARY_FILE"
+            echo "::error::Frontend coverage report generation failed"
+            cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - name: Upload frontend coverage summary
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-coverage-summary
+          path: electron-app/frontend-coverage-summary.md
+          retention-days: 1
+
+      - name: Upload frontend coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-coverage
+          path: electron-app/coverage/
+          retention-days: 14
+
+  # ==================== Security Check ====================
+  security:
+    name: Security Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Rust dependency audit
+        if: always()
+        continue-on-error: false
+        run: |
+          if [ -f Cargo.lock ]; then
+            cargo install cargo-audit --locked
+            cargo audit || echo "::warning::Rust dependencies have vulnerabilities"
+          else
+            echo "::notice::Cargo.lock not found, skipping Rust dependency audit"
+          fi
+
+      - name: Check hardcoded secrets
+        run: |
+          echo "Checking for hardcoded secrets..."
+          if grep -rE "(api[_-]?key|apikey|secret|password|token)\s*[=:]\s*['\"][^'\"]{10,}['\"]" \
+            --include="*.rs" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.json" \
+            --exclude-dir="node_modules" --exclude-dir="target" --exclude-dir="dist" \
+            --exclude-dir="coverage" --exclude-dir="tests" --exclude-dir="__tests__" \
+            --exclude="*.test.*" --exclude="*.spec.*" --exclude="*_test.*" --exclude="test_*" \
+            .; then
+            echo "::error::Found hardcoded secrets, use environment variables or config files"
+            exit 1
+          fi
+          echo "::notice::No hardcoded secrets found"
+
+      - name: Check sensitive files
+        run: |
+          echo "Checking for sensitive files..."
+          SENSITIVE_FILES=(
+            ".env"
+            ".env.local"
+            ".env.production"
+            "*.pem"
+            "*.key"
+            "secrets.json"
+            "credentials.json"
+          )
+
+          for file in "${SENSITIVE_FILES[@]}"; do
+            if ls $file 2>/dev/null | grep -q .; then
+              echo "::error::Found sensitive file: $file, please add to .gitignore"
+              exit 1
+            fi
+          done
+          echo "::notice::No sensitive files found"
+
+  # ==================== Gate Result Summary ====================
+  gate-result:
+    name: Gate Result
+    runs-on: ubuntu-latest
+    needs: [rust-fmt, rust-clippy, rust-test, frontend-test, security]
+    if: always()
+
+    steps:
+      - name: Download Rust coverage summary
+        uses: actions/download-artifact@v4
+        if: always()
+        with:
+          name: rust-coverage-summary
+          path: coverage-artifacts
+        continue-on-error: true
+
+      - name: Download frontend coverage summary
+        uses: actions/download-artifact@v4
+        if: always()
+        with:
+          name: frontend-coverage-summary
+          path: coverage-artifacts
+        continue-on-error: true
+
+      - name: Check gate results
+        run: |
+          echo "============================================"
+          echo "  Golem CI Gate Result"
+          echo "============================================"
+          echo ""
+
+          RUST_FMT="${{ needs.rust-fmt.result }}"
+          RUST_CLIPPY="${{ needs.rust-clippy.result }}"
+          RUST_TEST="${{ needs.rust-test.result }}"
+          FRONTEND_TEST="${{ needs.frontend-test.result }}"
+          SECURITY_RESULT="${{ needs.security.result }}"
+
+          echo "| Check | Status |"
+          echo "|-------|--------|"
+          echo "| Rust Format | $RUST_FMT |"
+          echo "| Rust Clippy | $RUST_CLIPPY |"
+          echo "| Rust Tests & Coverage | $RUST_TEST |"
+          echo "| Frontend Tests & Coverage | $FRONTEND_TEST |"
+          echo "| Security Check | $SECURITY_RESULT |"
+          echo ""
+
+          if [ -f coverage-artifacts/rust-coverage-summary.md ]; then
+            echo "---"
+            cat coverage-artifacts/rust-coverage-summary.md
+            echo ""
+          fi
+
+          if [ -f coverage-artifacts/frontend-coverage-summary.md ]; then
+            echo "---"
+            cat coverage-artifacts/frontend-coverage-summary.md
+            echo ""
+          fi
+
+          if [[ "$RUST_FMT" == "success" && \
+                "$RUST_CLIPPY" == "success" && \
+                "$RUST_TEST" == "success" && \
+                "$FRONTEND_TEST" == "success" && \
+                "$SECURITY_RESULT" == "success" ]]; then
+            echo "All gate checks passed!"
+            exit 0
+          else
+            echo "Gate checks failed, please fix the issues above"
+            exit 1
+          fi
+
+      - name: PR gate status comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            const results = {
+              'Rust Format': '${{ needs.rust-fmt.result }}',
+              'Rust Clippy': '${{ needs.rust-clippy.result }}',
+              'Rust Tests & Coverage': '${{ needs.rust-test.result }}',
+              'Frontend Tests & Coverage': '${{ needs.frontend-test.result }}',
+              'Security Check': '${{ needs.security.result }}',
+            };
+
+            const statusEmoji = (status) => status === 'success' ? '✅' : (status === 'skipped' ? '⏭️' : '❌');
+
+            let tableRows = Object.entries(results).map(([name, status]) =>
+              `| ${name} | ${statusEmoji(status)} ${status} |`
+            ).join('\n');
+
+            const allPassed = Object.values(results).every(r => r === 'success');
+
+            let coverageSection = '';
+            try {
+              const rustCov = fs.readFileSync('coverage-artifacts/rust-coverage-summary.md', 'utf8');
+              coverageSection += '\n' + rustCov + '\n';
+            } catch (e) {}
+            try {
+              const feCov = fs.readFileSync('coverage-artifacts/frontend-coverage-summary.md', 'utf8');
+              coverageSection += '\n' + feCov + '\n';
+            } catch (e) {}
+
+            const body = `## Gate Check Result
+
+            | Check | Status |
+            |-------|--------|
+            ${tableRows}
+            ${coverageSection}
+            ${allPassed
+              ? '### All checks passed, ready to merge\n\n> Click **Squash and merge** to merge this PR'
+              : '### Some checks failed, please fix and resubmit'}
+            `;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('Gate Check Result')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
