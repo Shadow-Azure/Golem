@@ -4,6 +4,7 @@
 
 pub mod llm;
 pub mod memory;
+pub mod protocol;
 pub mod session;
 pub mod task;
 
