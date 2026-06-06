@@ -1,6 +1,7 @@
 use anyhow::Result;
 
 mod config;
+mod openai;
 
 #[tokio::main]
 async fn main() -> Result<()> {
