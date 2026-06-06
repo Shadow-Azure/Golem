@@ -3,6 +3,7 @@ use anyhow::Result;
 pub mod chat;
 mod config;
 mod openai;
+pub mod ws;
 
 #[tokio::main]
 async fn main() -> Result<()> {
