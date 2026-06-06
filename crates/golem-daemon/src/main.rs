@@ -1,5 +1,6 @@
 use anyhow::Result;
 
+pub mod chat;
 mod config;
 mod openai;
 
