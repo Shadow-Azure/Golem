@@ -23,7 +23,7 @@ func runForeground() {
 	}))
 	slog.SetDefault(logger)
 
-	logger.Info("starting Golem AI Agent", "version", version)
+	logger.Info("starting Golem AI Agent", "version", Version)
 
 	// Determine config path
 	configPath := cfgFile
