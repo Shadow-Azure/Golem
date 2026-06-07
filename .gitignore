@@ -60,3 +60,6 @@ coverage.out
 release/*
 !release/README.md
 !release/release-pipeline.md
+
+# Vue build output (served by Go web server)
+web/static/
