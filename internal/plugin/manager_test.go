@@ -62,7 +62,7 @@ func (p *MockProviderPlugin) ChatStream(ctx context.Context, messages []core.Mes
 	return ch, nil
 }
 func (p *MockProviderPlugin) GetProviderType() string { return p.providerType }
-func (p *MockProviderPlugin) SupportsStreaming() bool  { return true }
+func (p *MockProviderPlugin) SupportsStreaming() bool { return true }
 
 // MockToolPlugin implements ToolPlugin for testing.
 type MockToolPlugin struct {

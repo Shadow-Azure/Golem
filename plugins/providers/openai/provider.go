@@ -44,14 +44,14 @@ func NewProvider(config ProviderConfig) *Provider {
 	}
 }
 
-func (p *Provider) Name() string                           { return "openai" }
-func (p *Provider) Version() string                        { return "1.0.0" }
+func (p *Provider) Name() string                                   { return "openai" }
+func (p *Provider) Version() string                                { return "1.0.0" }
 func (p *Provider) Initialize(config map[string]interface{}) error { return nil }
-func (p *Provider) Start() error                           { return nil }
-func (p *Provider) Stop() error                            { return nil }
-func (p *Provider) HealthCheck() plugin.HealthStatus        { return plugin.HealthStatus{Healthy: true} }
-func (p *Provider) GetProviderType() string                 { return "openai" }
-func (p *Provider) SupportsStreaming() bool                 { return true }
+func (p *Provider) Start() error                                   { return nil }
+func (p *Provider) Stop() error                                    { return nil }
+func (p *Provider) HealthCheck() plugin.HealthStatus               { return plugin.HealthStatus{Healthy: true} }
+func (p *Provider) GetProviderType() string                        { return "openai" }
+func (p *Provider) SupportsStreaming() bool                        { return true }
 
 // Chat sends messages to the OpenAI API and returns a completion response.
 func (p *Provider) Chat(ctx context.Context, messages []core.Message, config core.ChatConfig) (*core.ChatResponse, error) {

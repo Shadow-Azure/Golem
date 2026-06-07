@@ -15,7 +15,9 @@ type EngineInterface interface {
 	Shutdown() error
 	GetSessionManager() SessionManagerInterface
 	GetEventBus() EventBusInterface
-	GetPluginManager() interface{ GetPlugin(name string) (interface{}, bool) }
+	GetPluginManager() interface {
+		GetPlugin(name string) (interface{}, bool)
+	}
 	GetConfig() *config.Config
 }
 
@@ -25,12 +27,14 @@ type Engine struct {
 	config     *config.Config
 	sessionMgr *SessionManager
 	eventBus   *EventBus
-	pluginMgr  interface{ GetPlugin(name string) (interface{}, bool) }
-	logger     *slog.Logger
-	ctx        context.Context
-	cancel     context.CancelFunc
-	mu         sync.RWMutex
-	started    bool
+	pluginMgr  interface {
+		GetPlugin(name string) (interface{}, bool)
+	}
+	logger  *slog.Logger
+	ctx     context.Context
+	cancel  context.CancelFunc
+	mu      sync.RWMutex
+	started bool
 }
 
 // NewEngine creates a new Engine from the provided configuration.
@@ -110,12 +114,16 @@ func (e *Engine) GetEventBus() EventBusInterface {
 }
 
 // GetPluginManager returns the plugin manager.
-func (e *Engine) GetPluginManager() interface{ GetPlugin(name string) (interface{}, bool) } {
+func (e *Engine) GetPluginManager() interface {
+	GetPlugin(name string) (interface{}, bool)
+} {
 	return e.pluginMgr
 }
 
 // SetPluginManager sets the plugin manager for the engine.
-func (e *Engine) SetPluginManager(pm interface{ GetPlugin(name string) (interface{}, bool) }) {
+func (e *Engine) SetPluginManager(pm interface {
+	GetPlugin(name string) (interface{}, bool)
+}) {
 	e.pluginMgr = pm
 }
 

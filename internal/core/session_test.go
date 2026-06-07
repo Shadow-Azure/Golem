@@ -316,3 +316,234 @@ func TestSessionManager_GetOrCreateSession(t *testing.T) {
 func TestSessionManager_InterfaceCompliance(t *testing.T) {
 	var _ SessionManagerInterface = (*SessionManager)(nil)
 }
+
+// Boundary condition tests
+
+func TestSessionManager_CreateSession_EmptyUserID(t *testing.T) {
+	sm := NewSessionManager(SessionConfig{
+		MaxHistory: 50,
+		TrimTo:     20,
+	})
+
+	session, err := sm.CreateSession("", "feishu")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should still create session with empty user ID
+	if session.UserID != "" {
+		t.Errorf("expected empty userID, got '%s'", session.UserID)
+	}
+}
+
+func TestSessionManager_CreateSession_EmptyChannel(t *testing.T) {
+	sm := NewSessionManager(SessionConfig{
+		MaxHistory: 50,
+		TrimTo:     20,
+	})
+
+	session, err := sm.CreateSession("user123", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should still create session with empty channel
+	if session.Channel != "" {
+		t.Errorf("expected empty channel, got '%s'", session.Channel)
+	}
+}
+
+func TestSessionManager_AddMessage_EmptyContent(t *testing.T) {
+	sm := NewSessionManager(SessionConfig{
+		MaxHistory: 50,
+		TrimTo:     20,
+	})
+
+	session, _ := sm.CreateSession("user123", "feishu")
+
+	msg := Message{
+		Role:    "user",
+		Content: "",
+	}
+
+	err := sm.AddMessage(session.ID, msg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	retrieved, _ := sm.GetSession(session.ID)
+	if len(retrieved.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(retrieved.Messages))
+	}
+	if retrieved.Messages[0].Content != "" {
+		t.Errorf("expected empty content, got '%s'", retrieved.Messages[0].Content)
+	}
+}
+
+func TestSessionManager_GetHistory_ZeroLimit(t *testing.T) {
+	sm := NewSessionManager(SessionConfig{
+		MaxHistory: 50,
+		TrimTo:     20,
+	})
+
+	session, _ := sm.CreateSession("user123", "feishu")
+
+	for i := 0; i < 5; i++ {
+		sm.AddMessage(session.ID, Message{
+			Role:    "user",
+			Content: "message",
+		})
+	}
+
+	// Zero limit should return all messages
+	history, err := sm.GetHistory(session.ID, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(history) != 5 {
+		t.Errorf("expected 5 messages, got %d", len(history))
+	}
+}
+
+func TestSessionManager_GetHistory_NegativeLimit(t *testing.T) {
+	sm := NewSessionManager(SessionConfig{
+		MaxHistory: 50,
+		TrimTo:     20,
+	})
+
+	session, _ := sm.CreateSession("user123", "feishu")
+
+	for i := 0; i < 5; i++ {
+		sm.AddMessage(session.ID, Message{
+			Role:    "user",
+			Content: "message",
+		})
+	}
+
+	// Negative limit should return all messages
+	history, err := sm.GetHistory(session.ID, -1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(history) != 5 {
+		t.Errorf("expected 5 messages, got %d", len(history))
+	}
+}
+
+func TestSessionManager_HistoryTrimming_ZeroMaxHistory(t *testing.T) {
+	sm := NewSessionManager(SessionConfig{
+		MaxHistory: 0,
+		TrimTo:     20,
+	})
+
+	session, _ := sm.CreateSession("user123", "feishu")
+
+	// Add messages - should not trim with MaxHistory=0
+	for i := 0; i < 10; i++ {
+		sm.AddMessage(session.ID, Message{
+			Role:    "user",
+			Content: "message",
+		})
+	}
+
+	retrieved, _ := sm.GetSession(session.ID)
+	if len(retrieved.Messages) != 10 {
+		t.Errorf("expected 10 messages (no trimming), got %d", len(retrieved.Messages))
+	}
+}
+
+func TestSessionManager_HistoryTrimming_ZeroTrimTo(t *testing.T) {
+	sm := NewSessionManager(SessionConfig{
+		MaxHistory: 5,
+		TrimTo:     0,
+	})
+
+	session, _ := sm.CreateSession("user123", "feishu")
+
+	// Add messages - should not trim with TrimTo=0
+	for i := 0; i < 10; i++ {
+		sm.AddMessage(session.ID, Message{
+			Role:    "user",
+			Content: "message",
+		})
+	}
+
+	retrieved, _ := sm.GetSession(session.ID)
+	if len(retrieved.Messages) != 10 {
+		t.Errorf("expected 10 messages (no trimming with TrimTo=0), got %d", len(retrieved.Messages))
+	}
+}
+
+// Error handling tests
+
+func TestSessionManager_AddMessage_NonexistentSession(t *testing.T) {
+	sm := NewSessionManager(SessionConfig{
+		MaxHistory: 50,
+		TrimTo:     20,
+	})
+
+	msg := Message{
+		Role:    "user",
+		Content: "Hello",
+	}
+
+	err := sm.AddMessage("nonexistent", msg)
+	if err == nil {
+		t.Fatal("expected error for nonexistent session")
+	}
+}
+
+func TestSessionManager_GetHistory_NonexistentSession(t *testing.T) {
+	sm := NewSessionManager(SessionConfig{
+		MaxHistory: 50,
+		TrimTo:     20,
+	})
+
+	_, err := sm.GetHistory("nonexistent", 10)
+	if err == nil {
+		t.Fatal("expected error for nonexistent session")
+	}
+}
+
+func TestSessionManager_DeleteSession_NonexistentSession(t *testing.T) {
+	sm := NewSessionManager(SessionConfig{
+		MaxHistory: 50,
+		TrimTo:     20,
+	})
+
+	err := sm.DeleteSession("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent session")
+	}
+}
+
+func TestSessionManager_ConcurrentAccess(t *testing.T) {
+	sm := NewSessionManager(SessionConfig{
+		MaxHistory: 100,
+		TrimTo:     50,
+	})
+
+	session, _ := sm.CreateSession("user123", "feishu")
+
+	// Concurrent writes
+	done := make(chan bool, 10)
+	for i := 0; i < 10; i++ {
+		go func(i int) {
+			sm.AddMessage(session.ID, Message{
+				Role:    "user",
+				Content: "concurrent message",
+			})
+			done <- true
+		}(i)
+	}
+
+	// Wait for all goroutines
+	for i := 0; i < 10; i++ {
+		<-done
+	}
+
+	retrieved, _ := sm.GetSession(session.ID)
+	if len(retrieved.Messages) != 10 {
+		t.Errorf("expected 10 messages, got %d", len(retrieved.Messages))
+	}
+}
