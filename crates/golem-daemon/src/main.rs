@@ -30,6 +30,7 @@ async fn main() -> Result<()> {
                     base_url: "https://api.openai.com/v1".to_string(),
                     temperature: 0.7,
                     max_tokens: 4096,
+                    system_prompt: None,
                 },
                 session: config::SessionConfig::default(),
             }
@@ -40,7 +41,7 @@ async fn main() -> Result<()> {
     let llm: Arc<dyn LlmProvider> = Arc::new(openai::OpenAiProvider::new(
         app_config.llm.base_url.clone(),
         app_config.llm.api_key.clone(),
-    ));
+    )?);
 
     // Create session manager
     let session_manager = Arc::new(chat::SessionManager::new(
@@ -55,7 +56,7 @@ async fn main() -> Result<()> {
     // Build chat config from loaded LLM settings
     let chat_config = golem_core::llm::ChatConfig {
         model: app_config.llm.model.clone(),
-        system_prompt: None,
+        system_prompt: app_config.llm.system_prompt.clone(),
         temperature: Some(app_config.llm.temperature),
         max_tokens: Some(app_config.llm.max_tokens),
     };

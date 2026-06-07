@@ -31,6 +31,8 @@ pub struct LlmConfig {
     pub base_url: String,
     pub temperature: f32,
     pub max_tokens: u32,
+    #[serde(default)]
+    pub system_prompt: Option<String>,
 }
 
 /// Session management configuration.
@@ -60,6 +62,7 @@ impl Default for LlmConfig {
             base_url: "https://api.openai.com/v1".to_string(),
             temperature: 0.7,
             max_tokens: 4096,
+            system_prompt: None,
         }
     }
 }

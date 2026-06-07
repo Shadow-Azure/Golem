@@ -16,16 +16,13 @@ pub struct OpenAiProvider {
 
 #[allow(dead_code)]
 impl OpenAiProvider {
-    pub fn new(base_url: String, api_key: String) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(60))
-            .build()
-            .expect("failed to build HTTP client");
-        Self {
+    pub fn new(base_url: String, api_key: String) -> anyhow::Result<Self> {
+        let client = Client::builder().timeout(Duration::from_secs(60)).build()?;
+        Ok(Self {
             client,
             base_url,
             api_key,
-        }
+        })
     }
 }
 
@@ -210,7 +207,8 @@ mod tests {
         let provider = OpenAiProvider::new(
             "https://api.openai.com/v1".to_string(),
             "sk-test-key".to_string(),
-        );
+        )
+        .expect("provider construction should not fail");
         assert_eq!(provider.name(), "openai");
     }
 }
