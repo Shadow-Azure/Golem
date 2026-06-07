@@ -315,6 +315,43 @@ tar -czf "release/golem-${PLATFORM}.tar.gz" -C release golem golem.example.yaml 
 PACKAGE_SIZE=$(du -h "release/golem-${PLATFORM}.tar.gz" | cut -f1)
 echo -e "${GREEN}Created package: release/golem-${PLATFORM}.tar.gz (${PACKAGE_SIZE})${NC}"
 
+# Step 8: Copy documentation
+echo -e "${YELLOW}Step 8: Copying documentation...${NC}"
+mkdir -p release/docs
+if [ -f docs/feishu.md ]; then
+    cp docs/feishu.md release/docs/feishu.md
+    echo -e "${GREEN}Copied: release/docs/feishu.md${NC}"
+else
+    echo -e "${YELLOW}Warning: docs/feishu.md not found, skipping...${NC}"
+fi
+echo -e "${GREEN}Documentation ready: release/docs/${NC}"
+
+# Step 9: Build WebChat UI (if pnpm available)
+echo -e "${YELLOW}Step 9: Building WebChat UI...${NC}"
+if command -v pnpm &> /dev/null; then
+    if [ -d "webchat" ]; then
+        cd webchat
+        if [ -f "package.json" ]; then
+            pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+            pnpm run build
+            cd ..
+            if [ -d "webchat/dist" ]; then
+                cp -r webchat/dist release/webchat
+                echo -e "${GREEN}Built and copied WebChat UI: release/webchat/${NC}"
+            else
+                echo -e "${YELLOW}Warning: WebChat build output not found, skipping...${NC}"
+            fi
+        else
+            cd ..
+            echo -e "${YELLOW}Warning: webchat/package.json not found, skipping...${NC}"
+        fi
+    else
+        echo -e "${YELLOW}Warning: webchat/ directory not found, skipping...${NC}"
+    fi
+else
+    echo -e "${YELLOW}Warning: pnpm not installed, skipping WebChat build...${NC}"
+fi
+
 # Summary
 echo ""
 echo -e "${GREEN}========================================${NC}"
@@ -326,6 +363,7 @@ echo "  release/golem                    - Binary (${BINARY_SIZE})"
 echo "  release/golem.example.yaml       - Example config"
 echo "  release/README.md                - Documentation"
 echo "  release/install.sh               - Install script"
+echo "  release/docs/feishu.md           - Feishu integration guide"
 echo "  release/golem-${PLATFORM}.tar.gz - Package (${PACKAGE_SIZE})"
 echo ""
 echo "To install:"
