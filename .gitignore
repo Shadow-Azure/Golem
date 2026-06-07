@@ -1,16 +1,30 @@
 # Dependencies
 node_modules/
-target/
 .pnpm-store/
 
 # Build output
 dist/
 out/
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
 
-# Rust
+# Rust (existing project)
+target/
 **/*.rs.bk
 *.pdb
 **/mutants.out*/
+
+# Go
+*.test
+*.out
+*.prof
+*.profraw
+*.profdata
+coverage/
 
 # Environment / secrets
 .env
@@ -29,6 +43,15 @@ Thumbs.db
 *~
 
 # Debug
-*.profraw
-*.profdata
-coverage/
+*.log
+*.tmp
+
+# Test coverage
+coverage.html
+coverage.out
+
+# Binary
+./golem
+./golem-daemon
+/bin/golem
+/bin/golem-daemon

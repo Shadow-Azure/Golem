@@ -1,0 +1,39 @@
+# Golem AI Agent Configuration
+
+server:
+  host: "0.0.0.0"
+  port: 9921
+
+llm:
+  default_provider: "openai"
+  providers:
+    openai:
+      api_key: "${OPENAI_API_KEY}"
+      base_url: "https://api.openai.com/v1"
+      model: "gpt-4o"
+      temperature: 0.7
+      max_tokens: 4096
+    claude:
+      api_key: "${ANTHROPIC_API_KEY}"
+      base_url: "https://api.anthropic.com"
+      model: "claude-3-opus-20240229"
+      temperature: 0.7
+      max_tokens: 4096
+
+session:
+  max_history: 50
+  trim_to: 20
+  idle_timeout: 30m
+  cleanup_interval: 5m
+
+plugins:
+  channels:
+    feishu:
+      app_id: "${FEISHU_APP_ID}"
+      app_secret: "${FEISHU_APP_SECRET}"
+      verification_token: "${FEISHU_VERIFICATION_TOKEN}"
+      encrypt_key: "${FEISHU_ENCRYPT_KEY}"
+
+logging:
+  level: "info"
+  format: "json"
