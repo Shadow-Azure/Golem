@@ -27,7 +27,7 @@ var chatCmd = &cobra.Command{
 }
 
 func init() {
-	chatCmd.Flags().StringVar(&chatProvider, "provider", "", "LLM 提供商 (openai, claude)")
+	chatCmd.Flags().StringVar(&chatProvider, "provider", "", "LLM 提供商 (openai, claude, minimax)")
 }
 
 func runChat(cmd *cobra.Command, args []string) {
@@ -83,6 +83,22 @@ func runChat(cmd *cobra.Command, args []string) {
 			fmt.Printf("加载 Claude 提供商失败: %v\n", err)
 		} else if providerName == "claude" {
 			provider = claudeProv
+		}
+	}
+
+	// MiniMax uses OpenAI-compatible API
+	if minimaxConfig, ok := cfg.LLM.Providers["minimax"]; ok {
+		minimaxProv := openaiPlugin.NewProvider(openaiPlugin.ProviderConfig{
+			APIKey:      minimaxConfig.APIKey,
+			BaseURL:     minimaxConfig.BaseURL,
+			Model:       minimaxConfig.Model,
+			Temperature: minimaxConfig.Temperature,
+			MaxTokens:   minimaxConfig.MaxTokens,
+		})
+		if err := pm.LoadPlugin("minimax", minimaxProv); err != nil {
+			fmt.Printf("加载 MiniMax 提供商失败: %v\n", err)
+		} else if providerName == "minimax" {
+			provider = minimaxProv
 		}
 	}
 

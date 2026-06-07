@@ -81,6 +81,22 @@ func runWeb(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	// MiniMax uses OpenAI-compatible API
+	if minimaxConfig, ok := cfg.LLM.Providers["minimax"]; ok {
+		minimaxProv := openaiPlugin.NewProvider(openaiPlugin.ProviderConfig{
+			APIKey:      minimaxConfig.APIKey,
+			BaseURL:     minimaxConfig.BaseURL,
+			Model:       minimaxConfig.Model,
+			Temperature: minimaxConfig.Temperature,
+			MaxTokens:   minimaxConfig.MaxTokens,
+		})
+		if err := pm.LoadPlugin("minimax", minimaxProv); err != nil {
+			fmt.Printf("加载 MiniMax 提供商失败: %v\n", err)
+		} else if cfg.LLM.DefaultProvider == "minimax" {
+			provider = minimaxProv
+		}
+	}
+
 	if provider == nil {
 		fmt.Println("未找到 LLM 提供商，请检查配置")
 		os.Exit(1)
