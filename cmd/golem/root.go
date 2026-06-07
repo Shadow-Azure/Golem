@@ -39,4 +39,6 @@ func init() {
 	rootCmd.AddCommand(onboardCmd)
 	rootCmd.AddCommand(configureCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(webCmd)
+	rootCmd.AddCommand(chatCmd)
 }
