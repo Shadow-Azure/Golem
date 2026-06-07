@@ -55,3 +55,8 @@ golem
 golem-daemon
 /bin/golem
 /bin/golem-daemon
+
+# Release artifacts
+release/*
+!release/README.md
+!release/release-pipeline.md
