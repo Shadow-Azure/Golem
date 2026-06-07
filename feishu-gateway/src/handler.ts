@@ -57,18 +57,21 @@ export class MessageHandler {
     };
 
     try {
-      const response = await this.daemon.sendChat(request);
+      const response = await this.daemon.sendChat(
+        request,
+        (delta: string) => {
+          // Stream each delta to Card Kit in real-time
+          this.streaming.onDelta(sessionId, chat_id, message_id, delta);
+        },
+      );
 
       if (response.error) {
         await this.feishu.replyMessage(message_id, `Error: ${response.error}`);
         return;
       }
 
-      if (response.deltas.length > 0) {
-        await this.streaming.onDone(sessionId, chat_id, message_id, response.fullResponse);
-      } else {
-        await this.feishu.replyMessage(message_id, response.fullResponse);
-      }
+      // Finalize the streaming card or fallback to regular reply
+      await this.streaming.onDone(sessionId, chat_id, message_id, response.fullResponse);
     } catch (e) {
       console.error("Failed to handle message:", e);
       await this.feishu.replyMessage(message_id, "Sorry, something went wrong.");

@@ -2,11 +2,13 @@ import WebSocket from "ws";
 import type { ChatRequest, DaemonMessage } from "./types.js";
 import { isStreamDelta, isStreamDone, isChatError } from "./types.js";
 
-interface ChatResponse {
+export interface ChatResponse {
   deltas: string[];
   fullResponse: string;
   error?: string;
 }
+
+type MessageCallback = (msg: DaemonMessage) => void;
 
 export class DaemonClient {
   private ws: WebSocket | null = null;
@@ -14,6 +16,7 @@ export class DaemonClient {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
   private reconnectBaseDelay = 1000;
+  private sessionCallbacks: Map<string, MessageCallback> = new Map();
 
   constructor(url: string) {
     this.url = url;
@@ -21,22 +24,38 @@ export class DaemonClient {
 
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.ws = new WebSocket(this.url);
+      const ws = new WebSocket(this.url);
 
-      this.ws.on("open", () => {
+      ws.on("open", () => {
         this.reconnectAttempts = 0;
         resolve();
       });
 
-      this.ws.on("error", (err) => {
-        if (this.ws?.readyState === WebSocket.CONNECTING) {
+      ws.on("error", (err) => {
+        if (ws.readyState === WebSocket.CONNECTING) {
           reject(err);
         }
       });
 
-      this.ws.on("close", () => {
+      ws.on("close", () => {
+        this.ws = null;
         this.scheduleReconnect();
       });
+
+      ws.on("message", (data: WebSocket.Data) => {
+        try {
+          const msg: DaemonMessage = JSON.parse(data.toString());
+          const sessionId = msg.session_id;
+          const callback = this.sessionCallbacks.get(sessionId);
+          if (callback) {
+            callback(msg);
+          }
+        } catch (e) {
+          console.error("Failed to parse daemon message:", e);
+        }
+      });
+
+      this.ws = ws;
     });
   }
 
@@ -57,7 +76,14 @@ export class DaemonClient {
     }, delay);
   }
 
-  sendChat(request: ChatRequest): Promise<ChatResponse> {
+  /**
+   * Send a chat request and receive streaming deltas via callbacks.
+   * onDelta is called for each streaming token, onDone when complete.
+   */
+  sendChat(
+    request: ChatRequest,
+    onDelta: (delta: string) => void,
+  ): Promise<ChatResponse> {
     return new Promise((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         reject(new Error("Not connected to daemon"));
@@ -67,29 +93,29 @@ export class DaemonClient {
       const deltas: string[] = [];
       let fullResponse = "";
 
-      const handler = (data: WebSocket.Data) => {
-        const msg: DaemonMessage = JSON.parse(data.toString());
-        if (msg.session_id !== request.session_id) return;
+      const timeout = setTimeout(() => {
+        this.sessionCallbacks.delete(request.session_id);
+        reject(new Error("Chat request timed out"));
+      }, 60_000);
 
+      const handler = (msg: DaemonMessage) => {
         if (isStreamDelta(msg)) {
           deltas.push(msg.delta);
+          onDelta(msg.delta);
         } else if (isStreamDone(msg)) {
           fullResponse = msg.full_response;
-          this.ws?.removeListener("message", handler);
+          clearTimeout(timeout);
+          this.sessionCallbacks.delete(request.session_id);
           resolve({ deltas, fullResponse });
         } else if (isChatError(msg)) {
-          this.ws?.removeListener("message", handler);
+          clearTimeout(timeout);
+          this.sessionCallbacks.delete(request.session_id);
           resolve({ deltas, fullResponse, error: msg.error });
         }
       };
 
-      this.ws.on("message", handler);
+      this.sessionCallbacks.set(request.session_id, handler);
       this.ws.send(JSON.stringify(request));
-
-      setTimeout(() => {
-        this.ws?.removeListener("message", handler);
-        reject(new Error("Chat request timed out"));
-      }, 60_000);
     });
   }
 
@@ -98,5 +124,6 @@ export class DaemonClient {
       this.ws.close();
       this.ws = null;
     }
+    this.sessionCallbacks.clear();
   }
 }
