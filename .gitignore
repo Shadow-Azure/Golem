@@ -51,8 +51,8 @@ coverage.html
 coverage.out
 
 # Binary
-golem
-golem-daemon
+/golem
+/golem-daemon
 /bin/golem
 /bin/golem-daemon
 
