@@ -99,10 +99,44 @@ func TestEngine_GetPluginManager_Nil(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	// Before SetPluginManager, should be nil.
 	pm := engine.GetPluginManager()
 	if pm != nil {
-		t.Error("plugin manager should be nil (not yet implemented)")
+		t.Error("plugin manager should be nil before SetPluginManager")
 	}
+}
+
+func TestEngine_SetPluginManager(t *testing.T) {
+	cfg := config.DefaultConfig()
+	engine, err := NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Create a dummy plugin manager that satisfies the anonymous interface.
+	dummy := &dummyPluginManager{plugins: map[string]interface{}{"test": true}}
+	engine.SetPluginManager(dummy)
+
+	got := engine.GetPluginManager()
+	if got == nil {
+		t.Error("plugin manager should not be nil after SetPluginManager")
+	}
+
+	// Verify it works.
+	p, ok := got.GetPlugin("test")
+	if !ok || p != true {
+		t.Error("expected to retrieve 'test' plugin from plugin manager")
+	}
+}
+
+// dummyPluginManager satisfies the EngineInterface's anonymous plugin manager interface for testing.
+type dummyPluginManager struct {
+	plugins map[string]interface{}
+}
+
+func (d *dummyPluginManager) GetPlugin(name string) (interface{}, bool) {
+	p, ok := d.plugins[name]
+	return p, ok
 }
 
 func TestEngine_SessionManagerReturnsInterface(t *testing.T) {

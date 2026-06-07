@@ -62,6 +62,7 @@ func (p *FeishuPlugin) Start() error {
 
 // Stop stops the plugin gracefully.
 func (p *FeishuPlugin) Stop() error {
+	p.dedup.Stop()
 	p.started = false
 	p.logger.Info("Feishu plugin stopped")
 	return nil

@@ -25,6 +25,7 @@ type Engine struct {
 	config     *config.Config
 	sessionMgr *SessionManager
 	eventBus   *EventBus
+	pluginMgr  interface{ GetPlugin(name string) (interface{}, bool) }
 	logger     *slog.Logger
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -108,9 +109,14 @@ func (e *Engine) GetEventBus() EventBusInterface {
 	return e.eventBus
 }
 
-// GetPluginManager returns the plugin manager (stub).
+// GetPluginManager returns the plugin manager.
 func (e *Engine) GetPluginManager() interface{ GetPlugin(name string) (interface{}, bool) } {
-	return nil
+	return e.pluginMgr
+}
+
+// SetPluginManager sets the plugin manager for the engine.
+func (e *Engine) SetPluginManager(pm interface{ GetPlugin(name string) (interface{}, bool) }) {
+	e.pluginMgr = pm
 }
 
 // GetConfig returns the engine configuration.

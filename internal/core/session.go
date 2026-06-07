@@ -90,12 +90,23 @@ func (sm *SessionManager) GetSession(sessionID string) (*Session, error) {
 }
 
 // GetOrCreateSession gets an existing session or creates a new one.
+// For existing sessions, returns a deep copy to prevent data races.
 func (sm *SessionManager) GetOrCreateSession(sessionID, userID, channel string) (*Session, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	if session, exists := sm.sessions[sessionID]; exists {
-		return session, nil
+		// Return a copy to prevent data races, consistent with GetSession.
+		copied := *session
+		copied.Messages = make([]Message, len(session.Messages))
+		copy(copied.Messages, session.Messages)
+		if session.Metadata != nil {
+			copied.Metadata = make(map[string]interface{}, len(session.Metadata))
+			for k, v := range session.Metadata {
+				copied.Metadata[k] = v
+			}
+		}
+		return &copied, nil
 	}
 
 	session := &Session{

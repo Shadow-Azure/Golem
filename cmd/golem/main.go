@@ -40,6 +40,7 @@ func main() {
 	}
 
 	pm := plugin.NewManager()
+	engine.SetPluginManager(&pluginManagerAdapter{mgr: pm})
 
 	// Register OpenAI provider
 	if openaiConfig, ok := cfg.LLM.Providers["openai"]; ok {
@@ -113,4 +114,15 @@ func main() {
 
 	logger.Info("Golem AI Agent stopped")
 	fmt.Println("Golem AI Agent stopped")
+}
+
+// pluginManagerAdapter wraps plugin.Manager to satisfy the Engine's
+// anonymous interface for GetPlugin, bridging the return type difference
+// between (plugin.Plugin, bool) and (interface{}, bool).
+type pluginManagerAdapter struct {
+	mgr *plugin.Manager
+}
+
+func (a *pluginManagerAdapter) GetPlugin(name string) (interface{}, bool) {
+	return a.mgr.GetPlugin(name)
 }
