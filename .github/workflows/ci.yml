@@ -245,11 +245,41 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./... || echo "::warning::Go dependencies may have vulnerabilities"
 
+  # ==================== Quality Gate Script ====================
+  quality-gate:
+    name: Quality Gate Script
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Go cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Run quality gate script
+        run: |
+          chmod +x test.sh
+          bash test.sh
+
   # ==================== Gate Result Summary ====================
   gate-result:
     name: Gate Result
     runs-on: ubuntu-latest
-    needs: [go-fmt, go-vet, go-test, go-build, security]
+    needs: [go-fmt, go-vet, go-test, go-build, security, quality-gate]
     if: always()
 
     steps:
@@ -273,6 +303,7 @@ jobs:
           GO_TEST="${{ needs.go-test.result }}"
           GO_BUILD="${{ needs.go-build.result }}"
           SECURITY_RESULT="${{ needs.security.result }}"
+          QUALITY_GATE="${{ needs.quality-gate.result }}"
 
           echo "| Check | Status |"
           echo "|-------|--------|"
@@ -281,6 +312,7 @@ jobs:
           echo "| Go Tests & Coverage | $GO_TEST |"
           echo "| Go Build | $GO_BUILD |"
           echo "| Security Check | $SECURITY_RESULT |"
+          echo "| Quality Gate Script | $QUALITY_GATE |"
           echo ""
 
           if [ -f coverage-artifacts/go-coverage-summary.md ]; then
@@ -293,7 +325,8 @@ jobs:
                 "$GO_VET" == "success" && \
                 "$GO_TEST" == "success" && \
                 "$GO_BUILD" == "success" && \
-                "$SECURITY_RESULT" == "success" ]]; then
+                "$SECURITY_RESULT" == "success" && \
+                "$QUALITY_GATE" == "success" ]]; then
             echo "All gate checks passed!"
             exit 0
           else
@@ -314,6 +347,7 @@ jobs:
               'Go Tests & Coverage': '${{ needs.go-test.result }}',
               'Go Build': '${{ needs.go-build.result }}',
               'Security Check': '${{ needs.security.result }}',
+              'Quality Gate Script': '${{ needs.quality-gate.result }}',
             };
 
             const statusEmoji = (status) => status === 'success' ? '✅' : (status === 'skipped' ? '⏭️' : '❌');
