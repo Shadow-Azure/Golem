@@ -1,0 +1,29 @@
+server:
+  host: "localhost"
+  port: 8080
+
+llm:
+  default_provider: "openai"
+  providers:
+    openai:
+      api_key: "test-key"
+      base_url: "https://api.openai.com/v1"
+      model: "gpt-4"
+      temperature: 0.5
+      max_tokens: 2048
+
+session:
+  max_history: 100
+  trim_to: 50
+  idle_timeout: 60m
+  cleanup_interval: 10m
+
+plugins:
+  channels:
+    feishu:
+      app_id: "test-app-id"
+      app_secret: "test-app-secret"
+
+logging:
+  level: "debug"
+  format: "text"
