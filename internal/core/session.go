@@ -66,7 +66,7 @@ func (sm *SessionManager) CreateSession(userID, channel string) (*Session, error
 	return session, nil
 }
 
-// GetSession returns a session by ID.
+// GetSession returns a deep copy of a session by ID.
 func (sm *SessionManager) GetSession(sessionID string) (*Session, error) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -76,7 +76,17 @@ func (sm *SessionManager) GetSession(sessionID string) (*Session, error) {
 		return nil, fmt.Errorf("session not found: %s", sessionID)
 	}
 
-	return session, nil
+	// Return a copy to prevent data races
+	copied := *session
+	copied.Messages = make([]Message, len(session.Messages))
+	copy(copied.Messages, session.Messages)
+	if session.Metadata != nil {
+		copied.Metadata = make(map[string]interface{}, len(session.Metadata))
+		for k, v := range session.Metadata {
+			copied.Metadata[k] = v
+		}
+	}
+	return &copied, nil
 }
 
 // GetOrCreateSession gets an existing session or creates a new one.
@@ -122,19 +132,21 @@ func (sm *SessionManager) AddMessage(sessionID string, msg Message) error {
 	session.UpdatedAt = time.Now()
 
 	// Trim history if necessary.
-	if sm.config.MaxHistory > 0 && len(session.Messages) > sm.config.MaxHistory {
+	if sm.config.MaxHistory > 0 && sm.config.TrimTo > 0 && len(session.Messages) > sm.config.MaxHistory {
 		trimmed := len(session.Messages) - sm.config.TrimTo
-		session.Messages = session.Messages[trimmed:]
-		sm.logger.Debug("trimmed session history",
-			"session_id", sessionID,
-			"trimmed_count", trimmed,
-		)
+		if trimmed > 0 {
+			session.Messages = session.Messages[trimmed:]
+			sm.logger.Debug("trimmed session history",
+				"session_id", sessionID,
+				"trimmed_count", trimmed,
+			)
+		}
 	}
 
 	return nil
 }
 
-// GetHistory returns the message history for a session.
+// GetHistory returns a deep copy of the message history for a session.
 func (sm *SessionManager) GetHistory(sessionID string, limit int) ([]Message, error) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -144,11 +156,17 @@ func (sm *SessionManager) GetHistory(sessionID string, limit int) ([]Message, er
 		return nil, fmt.Errorf("session not found: %s", sessionID)
 	}
 
+	var messages []Message
 	if limit <= 0 || limit > len(session.Messages) {
-		return session.Messages, nil
+		messages = session.Messages
+	} else {
+		messages = session.Messages[len(session.Messages)-limit:]
 	}
 
-	return session.Messages[len(session.Messages)-limit:], nil
+	// Return a copy to prevent data races
+	result := make([]Message, len(messages))
+	copy(result, messages)
+	return result, nil
 }
 
 // DeleteSession deletes a session.
