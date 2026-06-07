@@ -28,7 +28,7 @@ func runOnboard(cmd *cobra.Command, args []string) {
 	var provider string
 	prompt := &survey.Select{
 		Message: "Select LLM provider:",
-		Options: []string{"OpenAI", "Claude", "Skip"},
+		Options: []string{"OpenAI", "Claude", "MiniMax", "Skip"},
 		Default: "OpenAI",
 	}
 	survey.AskOne(prompt, &provider)
@@ -69,7 +69,8 @@ func runOnboard(cmd *cobra.Command, args []string) {
 func configureLLMWizard(provider string) map[string]interface{} {
 	llmConfig := make(map[string]interface{})
 
-	if provider == "OpenAI" {
+	switch provider {
+	case "OpenAI":
 		llmConfig["default_provider"] = "openai"
 
 		var apiKey string
@@ -92,7 +93,8 @@ func configureLLMWizard(provider string) map[string]interface{} {
 				"model":   model,
 			},
 		}
-	} else {
+
+	case "Claude":
 		llmConfig["default_provider"] = "claude"
 
 		var apiKey string
@@ -113,6 +115,31 @@ func configureLLMWizard(provider string) map[string]interface{} {
 			"claude": map[string]interface{}{
 				"api_key": apiKey,
 				"model":   model,
+			},
+		}
+
+	case "MiniMax":
+		llmConfig["default_provider"] = "minimax"
+
+		var apiKey string
+		prompt := &survey.Password{
+			Message: "Enter MiniMax API Key:",
+		}
+		survey.AskOne(prompt, &apiKey)
+
+		var model string
+		prompt2 := &survey.Select{
+			Message: "Select model:",
+			Options: []string{"MiniMax-M2.7-highspeed", "MiniMax-M2.7", "abab6.5-chat", "abab6.5s-chat"},
+			Default: "MiniMax-M2.7-highspeed",
+		}
+		survey.AskOne(prompt2, &model)
+
+		llmConfig["providers"] = map[string]interface{}{
+			"minimax": map[string]interface{}{
+				"api_key":  apiKey,
+				"base_url": "https://api.minimaxi.com/v1",
+				"model":    model,
 			},
 		}
 	}
