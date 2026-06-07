@@ -76,29 +76,16 @@ async fn main() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("Listening on {addr}");
 
-    // Graceful shutdown
-    let (tx, rx) = tokio::sync::watch::channel(());
-    let server = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal(rx));
+    // Graceful shutdown: ctrl-c triggers axum's drain
+    let server = axum::serve(listener, app).with_graceful_shutdown(async {
+        tokio::signal::ctrl_c().await.ok();
+        tracing::info!("Received shutdown signal, draining connections...");
+    });
 
-    tokio::select! {
-        result = server => {
-            if let Err(e) = result {
-                tracing::error!("Server error: {e}");
-            }
-        }
-        _ = tokio::signal::ctrl_c() => {
-            tracing::info!("Received Ctrl+C, shutting down...");
-            drop(tx);
-        }
+    if let Err(e) = server.await {
+        tracing::error!("Server error: {e}");
     }
 
     tracing::info!("Golem daemon stopped");
     Ok(())
-}
-
-async fn shutdown_signal(mut rx: tokio::sync::watch::Receiver<()>) {
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {}
-        _ = rx.changed() => {}
-    }
 }
