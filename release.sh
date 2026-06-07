@@ -285,10 +285,12 @@ else
     echo -e "${YELLOW}Config file already exists, skipping...${NC}"
 fi
 
-# Create symlink (optional)
-if [ -d /usr/local/bin ]; then
+# Create symlink (optional, requires write permission)
+if [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
     ln -sf ~/.golem/golem /usr/local/bin/golem
     echo -e "${GREEN}Created symlink: /usr/local/bin/golem${NC}"
+else
+    echo -e "${YELLOW}Note: ~/.golem/golem is installed. Add ~/.golem to PATH or run with full path.${NC}"
 fi
 
 echo ""
