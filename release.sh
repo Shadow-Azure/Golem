@@ -62,7 +62,7 @@ fi
 
 echo -e "${GREEN}Building for ${GOOS}/${GOARCH}...${NC}"
 
-CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -o release/golem ./cmd/golem
+CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -ldflags "-X main.Version=${VERSION}" -o release/golem ./cmd/golem
 chmod +x release/golem
 
 BINARY_SIZE=$(du -h release/golem | cut -f1)
