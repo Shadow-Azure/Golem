@@ -184,6 +184,24 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	// Get history
 	history, _ := s.engine.GetSessionManager().GetHistory(session.ID, 50)
 
+	// Check if provider supports streaming
+	if !s.provider.SupportsStreaming() {
+		// Fall back to non-streaming
+		response, err := s.provider.Chat(r.Context(), history, core.ChatConfig{})
+		if err != nil {
+			s.writeSSEError(w, flusher, "Failed to get response")
+			return
+		}
+		s.writeSSEContent(w, flusher, response.Content)
+		s.writeSSEDone(w, flusher)
+
+		s.engine.GetSessionManager().AddMessage(session.ID, core.Message{
+			Role:    "assistant",
+			Content: response.Content,
+		})
+		return
+	}
+
 	// Call LLM with streaming
 	stream, err := s.provider.ChatStream(r.Context(), history, core.ChatConfig{
 		Stream: true,

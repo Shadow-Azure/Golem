@@ -63,3 +63,5 @@ release/*
 
 # Vue build output (served by Go web server)
 web/static/
+.claude
+release_test

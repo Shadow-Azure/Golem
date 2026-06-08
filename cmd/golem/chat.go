@@ -163,7 +163,7 @@ func runChat(cmd *cobra.Command, args []string) {
 		}
 
 		fmt.Print("AI: ")
-		fullResponse, err := streamResponse(provider, history)
+		fullResponse, err := streamResponse(cmd.Context(), provider, history)
 		if err != nil {
 			fmt.Printf("\n错误: %v\n", err)
 			continue
@@ -225,8 +225,8 @@ func handleChatCommand(input string, engine *core.Engine, session *core.Session)
 }
 
 // streamResponse streams the LLM response with typewriter effect
-func streamResponse(provider plugin.ProviderPlugin, messages []core.Message) (string, error) {
-	stream, err := provider.ChatStream(context.Background(), messages, core.ChatConfig{
+func streamResponse(ctx context.Context, provider plugin.ProviderPlugin, messages []core.Message) (string, error) {
+	stream, err := provider.ChatStream(ctx, messages, core.ChatConfig{
 		Stream: true,
 	})
 	if err != nil {
