@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Go proxy for China region
+export GOPROXY=https://goproxy.cn,direct
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'

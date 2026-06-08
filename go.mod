@@ -5,6 +5,12 @@ go 1.21
 require gopkg.in/yaml.v3 v3.0.1
 
 require (
+	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/gorilla/websocket v1.5.0 // indirect
+	github.com/larksuite/oapi-sdk-go/v3 v3.4.1
+)
+
+require (
 	github.com/AlecAivazis/survey/v2 v2.3.7
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect

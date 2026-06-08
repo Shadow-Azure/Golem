@@ -1,5 +1,8 @@
 .PHONY: build test test-cover lint clean run fmt vet tidy check
 
+# Go proxy for China region
+export GOPROXY=https://goproxy.cn,direct
+
 # Build the golem binary
 build:
 	go build -o bin/golem ./cmd/golem
