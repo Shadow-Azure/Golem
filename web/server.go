@@ -36,17 +36,27 @@ func NewServer(engine *core.Engine, provider plugin.ProviderPlugin, addr string)
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
-	// Static files
-	staticDir := filepath.Join(".", "web", "static")
+	// Static files - look relative to binary location
+	execPath, err := os.Executable()
+	if err != nil {
+		s.logger.Warn("failed to get executable path, using current dir", "error", err)
+		execPath = "."
+	}
+	execDir := filepath.Dir(execPath)
+	staticDir := filepath.Join(execDir, "web", "static")
+
 	if _, err := os.Stat(staticDir); err == nil {
 		mux.Handle("/", http.FileServer(http.Dir(staticDir)))
 		s.logger.Info("serving static files", "dir", staticDir)
+	} else {
+		s.logger.Warn("static files not found", "dir", staticDir)
 	}
 
 	// API endpoints
 	mux.HandleFunc("/api/chat", s.handleChat)
 	mux.HandleFunc("/api/history", s.handleHistory)
 	mux.HandleFunc("/api/clear", s.handleClear)
+	mux.HandleFunc("/api/stream", s.handleStream)
 
 	s.logger.Info("starting webchat server", "addr", s.addr)
 	return http.ListenAndServe(s.addr, mux)

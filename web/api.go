@@ -3,6 +3,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/Shadow-Azure/Golem/internal/core"
@@ -135,4 +136,101 @@ func (s *Server) writeError(w http.ResponseWriter, code int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(ErrorResponse{Error: message})
+}
+
+// handleStream handles GET /api/stream for SSE streaming.
+func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check if response supports flushing
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	// Set SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Get message from query params
+	message := r.URL.Query().Get("message")
+	if message == "" {
+		s.writeSSEError(w, flusher, "Message required")
+		return
+	}
+
+	// Get or create session
+	session, err := s.getOrCreateSession()
+	if err != nil {
+		s.writeSSEError(w, flusher, "Failed to get session")
+		return
+	}
+
+	// Add user message
+	if err := s.engine.GetSessionManager().AddMessage(session.ID, core.Message{
+		Role:    "user",
+		Content: message,
+	}); err != nil {
+		s.writeSSEError(w, flusher, "Failed to add message")
+		return
+	}
+
+	// Get history
+	history, _ := s.engine.GetSessionManager().GetHistory(session.ID, 50)
+
+	// Call LLM with streaming
+	stream, err := s.provider.ChatStream(r.Context(), history, core.ChatConfig{
+		Stream: true,
+	})
+	if err != nil {
+		s.writeSSEError(w, flusher, "Failed to get response")
+		return
+	}
+
+	// Stream response
+	var fullResponse string
+	for chunk := range stream {
+		if chunk.Error != nil {
+			s.writeSSEError(w, flusher, chunk.Error.Error())
+			break
+		}
+		if chunk.Done {
+			s.writeSSEDone(w, flusher)
+			break
+		}
+
+		// Send chunk
+		s.writeSSEContent(w, flusher, chunk.Content)
+		fullResponse += chunk.Content
+	}
+
+	// Add assistant message to session
+	s.engine.GetSessionManager().AddMessage(session.ID, core.Message{
+		Role:    "assistant",
+		Content: fullResponse,
+	})
+}
+
+func (s *Server) writeSSEContent(w http.ResponseWriter, f http.Flusher, content string) {
+	data, _ := json.Marshal(map[string]string{"content": content})
+	fmt.Fprintf(w, "data: %s\n\n", data)
+	f.Flush()
+}
+
+func (s *Server) writeSSEError(w http.ResponseWriter, f http.Flusher, msg string) {
+	data, _ := json.Marshal(map[string]string{"error": msg})
+	fmt.Fprintf(w, "data: %s\n\n", data)
+	f.Flush()
+}
+
+func (s *Server) writeSSEDone(w http.ResponseWriter, f http.Flusher) {
+	data, _ := json.Marshal(map[string]bool{"done": true})
+	fmt.Fprintf(w, "data: %s\n\n", data)
+	f.Flush()
 }
