@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Shadow-Azure/Golem/internal/config"
 	"github.com/Shadow-Azure/Golem/internal/core"
@@ -162,18 +163,18 @@ func runChat(cmd *cobra.Command, args []string) {
 		}
 
 		fmt.Print("AI: ")
-		response, err := provider.Chat(context.Background(), history, core.ChatConfig{})
+		fullResponse, err := streamResponse(provider, history)
 		if err != nil {
-			fmt.Printf("错误: %v\n", err)
+			fmt.Printf("\n错误: %v\n", err)
 			continue
 		}
 
-		fmt.Println(response.Content)
+		fmt.Println()
 		fmt.Println()
 
 		if err := engine.GetSessionManager().AddMessage(session.ID, core.Message{
 			Role:    "assistant",
-			Content: response.Content,
+			Content: fullResponse,
 		}); err != nil {
 			fmt.Printf("添加助手消息失败: %v\n", err)
 		}
@@ -221,4 +222,34 @@ func handleChatCommand(input string, engine *core.Engine, session *core.Session)
 		fmt.Printf("未知命令: %s\n", input)
 		return true
 	}
+}
+
+// streamResponse streams the LLM response with typewriter effect
+func streamResponse(provider plugin.ProviderPlugin, messages []core.Message) (string, error) {
+	stream, err := provider.ChatStream(context.Background(), messages, core.ChatConfig{
+		Stream: true,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	var fullResponse string
+	for chunk := range stream {
+		if chunk.Error != nil {
+			return fullResponse, chunk.Error
+		}
+		if chunk.Done {
+			break
+		}
+
+		// Character-by-character output
+		for _, char := range chunk.Content {
+			fmt.Print(string(char))
+			time.Sleep(20 * time.Millisecond)
+		}
+
+		fullResponse += chunk.Content
+	}
+
+	return fullResponse, nil
 }
