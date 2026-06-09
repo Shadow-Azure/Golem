@@ -1,0 +1,33 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+llm:
+  default_provider: "openai"
+  providers:
+    openai:
+      api_key: "${OPENAI_API_KEY}"
+      model: "gpt-4o"
+      temperature: 0.7
+      max_tokens: 4096
+
+session:
+  max_history: 100
+  trim_to: 50
+  idle_timeout: 30m
+  cleanup_interval: 5m
+
+plugins:
+  channels:
+    feishu:
+      app_id: "${FEISHU_APP_ID}"
+      app_secret: "${FEISHU_APP_SECRET}"
+      verification_token: "${FEISHU_VERIFICATION_TOKEN}"
+      encrypt_key: "${FEISHU_ENCRYPT_KEY}"
+      typing_indicator: true
+      streaming: true
+      stream_throttle_ms: 160
+
+logging:
+  level: "info"
+  format: "json"

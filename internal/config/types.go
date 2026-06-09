@@ -46,6 +46,13 @@ type PluginsConfig struct {
 	Providers map[string]map[string]interface{} `yaml:"providers" json:"providers"`
 }
 
+// FeishuChannelConfig contains Feishu-specific channel configuration.
+type FeishuChannelConfig struct {
+	TypingIndicator  bool `yaml:"typing_indicator" json:"typing_indicator"`
+	Streaming        bool `yaml:"streaming" json:"streaming"`
+	StreamThrottleMs int  `yaml:"stream_throttle_ms" json:"stream_throttle_ms"`
+}
+
 // LoggingConfig contains logging configuration.
 type LoggingConfig struct {
 	Level  string `yaml:"level" json:"level"`

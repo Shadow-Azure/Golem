@@ -75,6 +75,41 @@ type ToolPlugin interface {
 	GetToolDefinition() core.ToolDefinition
 }
 
+// StreamingCapable is an optional interface for channels that support
+// streaming reply output (e.g., Feishu Card Kit).
+type StreamingCapable interface {
+	// CreateStreamReply creates a streaming reply session.
+	CreateStreamReply(ctx context.Context, sessionID string, opts StreamReplyOptions) (*StreamSession, error)
+
+	// SendDelta sends a streaming delta update to the reply session.
+	SendDelta(ctx context.Context, session *StreamSession, delta string) error
+
+	// FinishStream completes the streaming reply.
+	FinishStream(ctx context.Context, session *StreamSession) error
+}
+
+// TypingCapable is an optional interface for channels that support
+// typing indicators (e.g., Feishu emoji reactions).
+type TypingCapable interface {
+	// StartTyping begins showing a typing indicator for the given message.
+	StartTyping(ctx context.Context, sessionID string, messageID string) error
+
+	// StopTyping stops showing the typing indicator.
+	StopTyping(ctx context.Context, sessionID string) error
+}
+
+// StreamReplyOptions contains options for creating a streaming reply.
+type StreamReplyOptions struct {
+	MessageID string // The message ID to reply to
+	ChatID    string // The chat/session ID
+}
+
+// StreamSession holds state for an active streaming reply.
+type StreamSession struct {
+	SessionID string
+	CardID    string // Feishu card message ID for subsequent updates
+}
+
 // PluginInfo contains metadata about a loaded plugin.
 type PluginInfo struct {
 	Name    string `json:"name"`

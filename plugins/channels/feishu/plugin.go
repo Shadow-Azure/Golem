@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
@@ -27,14 +28,18 @@ type FeishuConfig struct {
 
 // FeishuPlugin implements the ChannelPlugin interface for Feishu messaging.
 type FeishuPlugin struct {
-	config   FeishuConfig
-	client   *lark.Client
-	wsCli    *larkws.Client
-	engine   core.EngineInterface
-	provider plugin.ProviderPlugin
-	logger   *slog.Logger
-	dedup    *Deduplicator
-	started  bool
+	config     FeishuConfig
+	client     *lark.Client
+	wsCli      *larkws.Client
+	engine     core.EngineInterface
+	provider   plugin.ProviderPlugin
+	logger     *slog.Logger
+	dedup      *Deduplicator
+	started    bool
+	typingMgr  *TypingManager
+	streamMgr  *StreamingManager
+	typingOnce sync.Once
+	streamOnce sync.Once
 }
 
 // NewFeishuPlugin creates a new FeishuPlugin with the given configuration.
@@ -97,6 +102,9 @@ func (p *FeishuPlugin) Start() error {
 
 // Stop stops the plugin gracefully.
 func (p *FeishuPlugin) Stop() error {
+	if p.typingMgr != nil {
+		p.typingMgr.Stop()
+	}
 	p.dedup.Stop()
 	p.started = false
 	p.logger.Info("Feishu plugin stopped")
@@ -227,8 +235,9 @@ func (p *FeishuPlugin) handleMessage(ctx context.Context, event *larkim.P2Messag
 
 	// Add user message to session
 	p.engine.GetSessionManager().AddMessage(session.ID, core.Message{
-		Role:    "user",
-		Content: content,
+		Role:      "user",
+		Content:   content,
+		Timestamp: time.Now(),
 	})
 
 	// Get session history
@@ -240,21 +249,256 @@ func (p *FeishuPlugin) handleMessage(ctx context.Context, event *larkim.P2Messag
 		return fmt.Errorf("no LLM provider configured")
 	}
 
-	// Call LLM
+	// Start typing indicator
+	if err := p.StartTyping(ctx, sessionID, msgID); err != nil {
+		p.logger.Debug("failed to start typing", "error", err)
+	}
+	defer func() {
+		if err := p.StopTyping(ctx, sessionID); err != nil {
+			p.logger.Debug("failed to stop typing", "error", err)
+		}
+	}()
+
+	// Try streaming reply
+	if p.provider.SupportsStreaming() {
+		return p.handleStreamingMessage(ctx, sessionID, chatID, msgID, session.ID, history)
+	}
+
+	// Fallback to non-streaming
+	return p.handleNonStreamingMessage(ctx, sessionID, session.ID, history)
+}
+
+// handleStreamingMessage handles a message using streaming reply via Feishu Card Kit.
+func (p *FeishuPlugin) handleStreamingMessage(ctx context.Context, sessionID, chatID, msgID, dbSessionID string, history []core.Message) error {
+	streamSession, err := p.CreateStreamReply(ctx, sessionID, plugin.StreamReplyOptions{
+		MessageID: msgID,
+		ChatID:    chatID,
+	})
+	if err != nil {
+		p.logger.Warn("failed to create stream reply, falling back to non-streaming", "error", err)
+		return p.handleNonStreamingMessage(ctx, sessionID, dbSessionID, history)
+	}
+
+	streamCh, err := p.provider.ChatStream(ctx, history, core.ChatConfig{})
+	if err != nil {
+		p.logger.Error("stream error", "error", err)
+		p.FinishStream(ctx, streamSession)
+		return err
+	}
+
+	fullResponse := ""
+	var streamErr error
+	for chunk := range streamCh {
+		if chunk.Error != nil {
+			p.logger.Error("stream chunk error", "error", chunk.Error)
+			streamErr = chunk.Error
+			break
+		}
+		if chunk.Done {
+			break
+		}
+		fullResponse += chunk.Content
+		if err := p.SendDelta(ctx, streamSession, chunk.Content); err != nil {
+			p.logger.Debug("failed to send delta", "error", err)
+		}
+	}
+
+	if err := p.FinishStream(ctx, streamSession); err != nil {
+		p.logger.Warn("failed to finish stream", "error", err)
+	}
+
+	// Save assistant message
+	p.engine.GetSessionManager().AddMessage(dbSessionID, core.Message{
+		Role:      "assistant",
+		Content:   fullResponse,
+		Timestamp: time.Now(),
+	})
+
+	return streamErr
+}
+
+// handleNonStreamingMessage handles a message using non-streaming LLM call.
+func (p *FeishuPlugin) handleNonStreamingMessage(ctx context.Context, sessionID, dbSessionID string, history []core.Message) error {
 	response, err := p.provider.Chat(ctx, history, core.ChatConfig{})
 	if err != nil {
 		p.logger.Error("LLM error", "error", err)
 		return err
 	}
 
-	// Add assistant message to session
-	p.engine.GetSessionManager().AddMessage(session.ID, core.Message{
-		Role:    "assistant",
-		Content: response.Content,
+	p.engine.GetSessionManager().AddMessage(dbSessionID, core.Message{
+		Role:      "assistant",
+		Content:   response.Content,
+		Timestamp: time.Now(),
 	})
 
-	// Send response back to Feishu
 	return p.SendMessage(sessionID, response.Content)
+}
+
+// StartTyping begins showing a typing indicator for the given message.
+func (p *FeishuPlugin) StartTyping(ctx context.Context, sessionID string, messageID string) error {
+	p.typingOnce.Do(p.initTypingManager)
+	return p.typingMgr.StartTyping(ctx, sessionID, messageID)
+}
+
+// StopTyping stops showing the typing indicator.
+func (p *FeishuPlugin) StopTyping(ctx context.Context, sessionID string) error {
+	if p.typingMgr == nil {
+		return nil
+	}
+	return p.typingMgr.StopTyping(ctx, sessionID)
+}
+
+// initTypingManager initializes the typing manager with Feishu API callbacks.
+func (p *FeishuPlugin) initTypingManager() {
+	p.typingMgr = NewTypingManager(TypingManagerConfig{
+		MaxAge:      2 * time.Minute,
+		TTLTimeout:  60 * time.Second,
+		MaxFailures: 2,
+		OnAddReaction: func(ctx context.Context, messageID, emojiType string) (string, error) {
+			if p.client == nil {
+				return "", fmt.Errorf("feishu client not initialized")
+			}
+			req := larkim.NewCreateMessageReactionReqBuilder().
+				MessageId(messageID).
+				Body(larkim.NewCreateMessageReactionReqBodyBuilder().
+					ReactionType(larkim.NewEmojiBuilder().
+						EmojiType(emojiType).
+						Build()).
+					Build()).
+				Build()
+
+			resp, err := p.client.Im.MessageReaction.Create(ctx, req)
+			if err != nil {
+				return "", err
+			}
+			if !resp.Success() {
+				return "", fmt.Errorf("feishu API error: %d %s", resp.Code, resp.Msg)
+			}
+			return derefString(resp.Data.ReactionId), nil
+		},
+		OnRemoveReaction: func(ctx context.Context, messageID, reactionID string) error {
+			if p.client == nil {
+				return fmt.Errorf("feishu client not initialized")
+			}
+			req := larkim.NewDeleteMessageReactionReqBuilder().
+				MessageId(messageID).
+				ReactionId(reactionID).
+				Build()
+
+			resp, err := p.client.Im.MessageReaction.Delete(ctx, req)
+			if err != nil {
+				return err
+			}
+			if !resp.Success() {
+				return fmt.Errorf("feishu API error: %d %s", resp.Code, resp.Msg)
+			}
+			return nil
+		},
+	})
+}
+
+// CreateStreamReply creates a Feishu Card Kit streaming reply.
+func (p *FeishuPlugin) CreateStreamReply(ctx context.Context, sessionID string, opts plugin.StreamReplyOptions) (*plugin.StreamSession, error) {
+	p.streamOnce.Do(p.initStreamingManager)
+	return p.streamMgr.CreateStreamReply(ctx, sessionID, opts)
+}
+
+// SendDelta sends a streaming delta to the card.
+func (p *FeishuPlugin) SendDelta(ctx context.Context, session *plugin.StreamSession, delta string) error {
+	if p.streamMgr == nil {
+		return fmt.Errorf("streaming manager not initialized")
+	}
+	return p.streamMgr.SendDelta(ctx, session, delta)
+}
+
+// FinishStream completes the streaming reply.
+func (p *FeishuPlugin) FinishStream(ctx context.Context, session *plugin.StreamSession) error {
+	if p.streamMgr == nil {
+		return fmt.Errorf("streaming manager not initialized")
+	}
+	return p.streamMgr.FinishStream(ctx, session)
+}
+
+// initStreamingManager initializes the streaming manager with Feishu Card Kit callbacks.
+func (p *FeishuPlugin) initStreamingManager() {
+	p.streamMgr = NewStreamingManager(StreamingManagerConfig{
+		MinUpdateInterval: 160 * time.Millisecond,
+		MinCharsDelta:     18,
+		OnCreateCard: func(ctx context.Context, chatID, messageID string) (string, error) {
+			if p.client == nil {
+				return "", fmt.Errorf("feishu client not initialized")
+			}
+			cardJSON := buildFeishuCardJSON("⏳ thinking...")
+			req := larkim.NewCreateMessageReqBuilder().
+				ReceiveIdType("chat_id").
+				Body(larkim.NewCreateMessageReqBodyBuilder().
+					ReceiveId(chatID).
+					MsgType("interactive").
+					Content(cardJSON).
+					Build()).
+				Build()
+
+			resp, err := p.client.Im.Message.Create(ctx, req)
+			if err != nil {
+				return "", err
+			}
+			if !resp.Success() {
+				return "", fmt.Errorf("feishu API error: %d %s", resp.Code, resp.Msg)
+			}
+			return derefString(resp.Data.MessageId), nil
+		},
+		OnUpdateCard: func(ctx context.Context, cardID, content string) error {
+			if p.client == nil {
+				return fmt.Errorf("feishu client not initialized")
+			}
+			cardJSON := buildFeishuCardJSON(content)
+			req := larkim.NewPatchMessageReqBuilder().
+				MessageId(cardID).
+				Body(larkim.NewPatchMessageReqBodyBuilder().
+					Content(cardJSON).
+					Build()).
+				Build()
+
+			resp, err := p.client.Im.Message.Patch(ctx, req)
+			if err != nil {
+				return err
+			}
+			if !resp.Success() {
+				return fmt.Errorf("feishu API error: %d %s", resp.Code, resp.Msg)
+			}
+			return nil
+		},
+		OnCloseCard: func(ctx context.Context, cardID, content string) error {
+			// Final update — same as OnUpdateCard
+			if p.client == nil {
+				return fmt.Errorf("feishu client not initialized")
+			}
+			cardJSON := buildFeishuCardJSON(content)
+			req := larkim.NewPatchMessageReqBuilder().
+				MessageId(cardID).
+				Body(larkim.NewPatchMessageReqBodyBuilder().
+					Content(cardJSON).
+					Build()).
+				Build()
+
+			resp, err := p.client.Im.Message.Patch(ctx, req)
+			if err != nil {
+				return err
+			}
+			if !resp.Success() {
+				return fmt.Errorf("feishu API error: %d %s", resp.Code, resp.Msg)
+			}
+			return nil
+		},
+		OnFallback: func(ctx context.Context, sessionID, content string) error {
+			return p.SendMessage(sessionID, content)
+		},
+	})
+}
+
+// buildFeishuCardJSON builds a Feishu interactive card JSON with the given markdown content.
+func buildFeishuCardJSON(content string) string {
+	return fmt.Sprintf(`{"config":{"wide_screen_mode":true},"header":{"title":{"tag":"plain_text","content":"Golem"},"template":"blue"},"elements":[{"tag":"markdown","content":"%s"}]}`, escapeJSON(content))
 }
 
 // derefString safely dereferences a string pointer.
@@ -295,3 +539,7 @@ func escapeJSON(s string) string {
 
 // Ensure FeishuPlugin implements plugin.ChannelPlugin.
 var _ plugin.ChannelPlugin = (*FeishuPlugin)(nil)
+
+// Ensure FeishuPlugin implements optional capability interfaces.
+var _ plugin.StreamingCapable = (*FeishuPlugin)(nil)
+var _ plugin.TypingCapable = (*FeishuPlugin)(nil)
