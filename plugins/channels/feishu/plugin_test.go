@@ -1,7 +1,10 @@
 package feishu
 
 import (
+	"context"
 	"testing"
+
+	"github.com/Shadow-Azure/Golem/internal/plugin"
 )
 
 func TestFeishuPlugin_Name(t *testing.T) {
@@ -103,5 +106,33 @@ func TestFeishuPlugin_Deduplication(t *testing.T) {
 
 	if !plugin.dedup.IsDuplicate("msg1") {
 		t.Error("second message should be duplicate")
+	}
+}
+
+func TestFeishuPlugin_ImplementsTypingCapable(t *testing.T) {
+	p := NewFeishuPlugin(FeishuConfig{})
+	var _ plugin.TypingCapable = p
+}
+
+func TestFeishuPlugin_ImplementsStreamingCapable(t *testing.T) {
+	p := NewFeishuPlugin(FeishuConfig{})
+	var _ plugin.StreamingCapable = p
+}
+
+func TestFeishuPlugin_StartTypingNoClient(t *testing.T) {
+	p := NewFeishuPlugin(FeishuConfig{})
+	// Should not panic even without a real Lark client
+	err := p.StartTyping(context.Background(), "feishu:ou_test", "msg1")
+	// Error expected because no real client, but should not panic
+	if err != nil {
+		t.Logf("StartTyping returned error (expected without real client): %v", err)
+	}
+}
+
+func TestFeishuPlugin_StopTypingNoClient(t *testing.T) {
+	p := NewFeishuPlugin(FeishuConfig{})
+	err := p.StopTyping(context.Background(), "feishu:ou_test")
+	if err != nil {
+		t.Logf("StopTyping returned error (expected without real client): %v", err)
 	}
 }
