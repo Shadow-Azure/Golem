@@ -23,16 +23,16 @@ type mockProvider struct {
 
 var _ plugin.ProviderPlugin = (*mockProvider)(nil)
 
-func (m *mockProvider) Name() string              { return "mock-provider" }
-func (m *mockProvider) Version() string            { return "0.1.0" }
+func (m *mockProvider) Name() string                              { return "mock-provider" }
+func (m *mockProvider) Version() string                           { return "0.1.0" }
 func (m *mockProvider) Initialize(_ map[string]interface{}) error { return nil }
-func (m *mockProvider) Start() error               { return nil }
-func (m *mockProvider) Stop() error                { return nil }
+func (m *mockProvider) Start() error                              { return nil }
+func (m *mockProvider) Stop() error                               { return nil }
 func (m *mockProvider) HealthCheck() plugin.HealthStatus {
 	return plugin.HealthStatus{Healthy: true, Message: "ok"}
 }
-func (m *mockProvider) GetProviderType() string    { return "mock" }
-func (m *mockProvider) SupportsStreaming() bool    { return false }
+func (m *mockProvider) GetProviderType() string { return "mock" }
+func (m *mockProvider) SupportsStreaming() bool { return false }
 
 func (m *mockProvider) Chat(_ context.Context, _ []core.Message, _ core.ChatConfig) (*core.ChatResponse, error) {
 	m.callCount++

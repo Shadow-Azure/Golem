@@ -6,7 +6,7 @@ llm:
   default_provider: "openai"
   providers:
     openai:
-      api_key: "test-key"
+      api_key: "${OPENAI_API_KEY}"
       base_url: "https://api.openai.com/v1"
       model: "gpt-4"
       temperature: 0.5
@@ -21,8 +21,8 @@ session:
 plugins:
   channels:
     feishu:
-      app_id: "test-app-id"
-      app_secret: "test-app-secret"
+      app_id: "${FEISHU_APP_ID}"
+      app_secret: "${FEISHU_APP_SECRET}"
 
 logging:
   level: "debug"
