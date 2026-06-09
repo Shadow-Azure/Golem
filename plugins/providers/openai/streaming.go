@@ -36,7 +36,16 @@ func (f *ThinkingFilter) Filter(chunk string) string {
 			// Look for closing tag
 			idx := strings.Index(f.buffer, "</think>")
 			if idx == -1 {
-				// Still in thinking block, consume all buffered content
+				// Still in thinking block - check for partial closing tag at end
+				for i := len(f.buffer); i > 0; i-- {
+					suffix := "</think>"
+					if strings.HasPrefix(suffix, f.buffer[i-1:]) {
+						// Buffer ends with partial closing tag, keep it in buffer
+						f.buffer = f.buffer[i-1:]
+						return output.String()
+					}
+				}
+				// No partial tag, consume all buffered content (still in thinking)
 				f.buffer = ""
 				return output.String()
 			}

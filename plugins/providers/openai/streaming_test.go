@@ -107,3 +107,69 @@ func TestThinkingFilter_PartialTag(t *testing.T) {
 		t.Errorf("expected '\\n\\nWorld', got '%s'", result2)
 	}
 }
+
+func TestThinkingFilter_PartialClosingTag(t *testing.T) {
+	filter := NewThinkingFilter()
+
+	// Start thinking block
+	result1 := filter.Filter("<think>\nreasoning\n")
+	if result1 != "" {
+		t.Errorf("expected empty, got '%s'", result1)
+	}
+
+	// Send partial closing tag: "
+	result2 := filter.Filter("")
+	if result2 != "" {
+		t.Errorf("expected empty, got '%s'", result2)
+	}
+
+	// Send remaining "</think>" and actual content
+	result3 := filter.Filter("</think>\n\nActual content")
+	if result3 != "\n\nActual content" {
+		t.Errorf("expected '\\n\\nActual content', got '%s'", result3)
+	}
+}
+
+func TestThinkingFilter_PartialClosingTagSplit(t *testing.T) {
+	filter := NewThinkingFilter()
+
+	// Start thinking block
+	result1 := filter.Filter("<think>\nreasoning\n")
+	if result1 != "" {
+		t.Errorf("expected empty, got '%s'", result1)
+	}
+
+	// Send partial closing tag: "</"
+	result2 := filter.Filter("</")
+	if result2 != "" {
+		t.Errorf("expected empty, got '%s'", result2)
+	}
+
+	// Send remaining "think>" and actual content
+	result3 := filter.Filter("think>\n\nActual content")
+	if result3 != "\n\nActual content" {
+		t.Errorf("expected '\\n\\nActual content', got '%s'", result3)
+	}
+}
+
+func TestThinkingFilter_ContentAfterPartialClosingTag(t *testing.T) {
+	filter := NewThinkingFilter()
+
+	// Start thinking block with partial closing tag at end
+	result1 := filter.Filter("<think>\nreasoning\n")
+	if result1 != "" {
+		t.Errorf("expected empty, got '%s'", result1)
+	}
+
+	// Send content that looks like partial closing tag but isn't
+	result2 := filter.Filter("more thinking")
+	if result2 != "" {
+		t.Errorf("expected empty, got '%s'", result2)
+	}
+
+	// Send actual closing tag and content
+	result3 := filter.Filter("\n</think>\n\nFinal content")
+	if result3 != "\n\nFinal content" {
+		t.Errorf("expected '\\n\\nFinal content', got '%s'", result3)
+	}
+}
