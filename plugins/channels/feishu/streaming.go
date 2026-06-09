@@ -41,6 +41,15 @@ type StreamingManager struct {
 // MinUpdateInterval and MinCharsDelta default to 160ms and 18 chars if not set (zero values).
 // Pass explicit small values like time.Nanosecond and 1 to disable throttling in tests.
 func NewStreamingManager(cfg StreamingManagerConfig) *StreamingManager {
+	if cfg.OnCreateCard == nil {
+		panic("StreamingManager: OnCreateCard callback must not be nil")
+	}
+	if cfg.OnUpdateCard == nil {
+		panic("StreamingManager: OnUpdateCard callback must not be nil")
+	}
+	if cfg.OnCloseCard == nil {
+		panic("StreamingManager: OnCloseCard callback must not be nil")
+	}
 	if cfg.MinUpdateInterval == 0 {
 		cfg.MinUpdateInterval = 160 * time.Millisecond
 	}
@@ -55,20 +64,33 @@ func NewStreamingManager(cfg StreamingManagerConfig) *StreamingManager {
 }
 
 // CreateStreamReply creates a new streaming reply session.
+// Returns an error if the sessionID already has an active streaming session.
 func (m *StreamingManager) CreateStreamReply(ctx context.Context, sessionID string, opts plugin.StreamReplyOptions) (*plugin.StreamSession, error) {
+	m.mu.Lock()
+	if _, exists := m.cards[sessionID]; exists {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("duplicate streaming session: %s", sessionID)
+	}
+	// Reserve the slot before releasing the lock to call the external callback.
+	m.cards[sessionID] = &streamingSession{
+		sessionID:      sessionID,
+		lastUpdateTime: time.Now(),
+	}
+	m.mu.Unlock()
+
 	cardID, err := m.config.OnCreateCard(ctx, opts.ChatID, opts.MessageID)
 	if err != nil {
+		m.mu.Lock()
+		delete(m.cards, sessionID)
+		m.mu.Unlock()
 		return nil, fmt.Errorf("failed to create card: %w", err)
 	}
 
 	m.mu.Lock()
-	m.cards[sessionID] = &streamingSession{
-		sessionID:      sessionID,
-		cardID:         cardID,
-		content:        "",
-		lastUpdateTime: time.Now(),
-	}
+	m.cards[sessionID].cardID = cardID
 	m.mu.Unlock()
+
+	m.logger.Info("streaming session created", "sessionID", sessionID, "cardID", cardID)
 
 	return &plugin.StreamSession{
 		SessionID: sessionID,
@@ -129,5 +151,6 @@ func (m *StreamingManager) FinishStream(ctx context.Context, session *plugin.Str
 	delete(m.cards, session.SessionID)
 	m.mu.Unlock()
 
+	m.logger.Info("streaming session finished", "sessionID", session.SessionID, "contentLen", len(content))
 	return m.config.OnCloseCard(ctx, card.cardID, content)
 }
