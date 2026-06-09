@@ -38,9 +38,15 @@ type StreamingManager struct {
 }
 
 // NewStreamingManager creates a new StreamingManager.
-// MinUpdateInterval and MinCharsDelta default to 0 (no throttle) if not set.
-// Recommended production values: 160ms and 18 chars.
+// MinUpdateInterval and MinCharsDelta default to 160ms and 18 chars if not set (zero values).
+// Pass explicit small values like time.Nanosecond and 1 to disable throttling in tests.
 func NewStreamingManager(cfg StreamingManagerConfig) *StreamingManager {
+	if cfg.MinUpdateInterval == 0 {
+		cfg.MinUpdateInterval = 160 * time.Millisecond
+	}
+	if cfg.MinCharsDelta == 0 {
+		cfg.MinCharsDelta = 18
+	}
 	return &StreamingManager{
 		config: cfg,
 		cards:  make(map[string]*streamingSession),

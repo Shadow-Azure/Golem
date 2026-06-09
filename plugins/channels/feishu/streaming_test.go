@@ -15,8 +15,8 @@ func TestStreamingManager_CreateAndFinish(t *testing.T) {
 	var mu sync.Mutex
 
 	mgr := NewStreamingManager(StreamingManagerConfig{
-		MinUpdateInterval: 0, // No throttle for test
-		MinCharsDelta:     0,
+		MinUpdateInterval: time.Nanosecond, // No throttle for test
+		MinCharsDelta:     1,
 		OnCreateCard: func(ctx context.Context, chatID, messageID string) (string, error) {
 			mu.Lock()
 			created = true
@@ -72,8 +72,8 @@ func TestStreamingManager_SendDelta(t *testing.T) {
 	var mu sync.Mutex
 
 	mgr := NewStreamingManager(StreamingManagerConfig{
-		MinUpdateInterval: 0,
-		MinCharsDelta:     0,
+		MinUpdateInterval: time.Nanosecond, // No throttle for test
+		MinCharsDelta:     1,
 		OnCreateCard: func(ctx context.Context, chatID, messageID string) (string, error) {
 			return "card-123", nil
 		},
