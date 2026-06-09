@@ -1,0 +1,4 @@
+llm:
+  providers:
+    openai:
+      api_key: "${TEST_API_KEY}"

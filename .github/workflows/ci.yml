@@ -1,11 +1,11 @@
 # Golem - CI Gate
 # Triggers on PR create/update and push to main
 #
-# Gate checks (Rust):
-# 1. Rust format check - cargo fmt
-# 2. Rust Clippy - code style + compile check
-# 3. Rust unit tests - cargo test + coverage
-# 4. Frontend type check + tests + coverage
+# Gate checks (Go):
+# 1. Go format check - gofmt
+# 2. Go vet - static analysis
+# 3. Go unit tests - go test + coverage
+# 4. Go build - build verification
 # 5. Security check - hardcoded secrets + dependency audit
 
 name: CI Gate
@@ -27,12 +27,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  RUST_VERSION: '1.88'
+  GO_VERSION: '1.21'
+  GOPROXY: 'https://goproxy.cn,direct'
 
 jobs:
-  # ==================== Rust Format Check ====================
-  rust-fmt:
-    name: Rust Format Check
+  # ==================== Go Format Check ====================
+  go-fmt:
+    name: Go Format Check
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -40,130 +41,125 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust ${{ env.RUST_VERSION }}
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          toolchain: ${{ env.RUST_VERSION }}
-          components: rustfmt
+          go-version: ${{ env.GO_VERSION }}
 
-      - name: Run cargo fmt
-        run: cargo fmt --all -- --check
-
-  # ==================== Rust Clippy ====================
-  rust-clippy:
-    name: Rust Clippy
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust ${{ env.RUST_VERSION }}
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          components: clippy
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-          key: "v2-clippy"
-
-      - name: Run cargo clippy
-        run: cargo clippy -p golem-core -p golem-cli -p golem-daemon --all-targets -- -D warnings
-
-  # ==================== Rust Unit Tests ====================
-  rust-test:
-    name: Rust Unit Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust ${{ env.RUST_VERSION }}
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-          key: "v2-test"
-
-      - name: Run cargo test
-        run: cargo test -p golem-core
-
-      - name: Install cargo-llvm-cov
+      - name: Run gofmt
         run: |
-          rustup component add llvm-tools-preview
-          cargo install cargo-llvm-cov --locked
-
-      - name: Run test coverage
-        run: |
-          mkdir -p coverage
-          cargo llvm-cov -p golem-core --cobertura --output-path coverage/cobertura.xml
-
-      - name: Generate coverage summary
-        if: always()
-        run: |
-          SUMMARY_FILE="rust-coverage-summary.md"
-          echo "## Rust Test Coverage" > "$SUMMARY_FILE"
-          echo "" >> "$SUMMARY_FILE"
-          if [ -f coverage/cobertura.xml ]; then
-            python3 -c "
-          import xml.etree.ElementTree as ET
-          tree = ET.parse('coverage/cobertura.xml')
-          root = tree.getroot()
-          rate = float(root.attrib.get('line-rate', 0)) * 100
-          branch_rate = float(root.attrib.get('branch-rate', 0)) * 100
-          print(f'| Metric | Coverage |')
-          print(f'|--------|----------|')
-          print(f'| Line coverage | {rate:.1f}% |')
-          print(f'| Branch coverage | {branch_rate:.1f}% |')
-          print()
-          print('| Module | Line Coverage |')
-          print('|--------|--------------|')
-          for pkg in root.findall('.//package'):
-              name = pkg.attrib.get('name', 'unknown')
-              pkg_rate = float(pkg.attrib.get('line-rate', 0)) * 100
-              bar_len = int(pkg_rate / 5)
-              bar = '█' * bar_len + '░' * (20 - bar_len)
-              print(f'| {name} | {bar} {pkg_rate:.1f}% |')
-          " >> "$SUMMARY_FILE"
-            echo "" >> "$SUMMARY_FILE"
-            echo "> See Rust coverage artifact for details" >> "$SUMMARY_FILE"
-          else
-            echo "> No coverage report generated" >> "$SUMMARY_FILE"
-            echo "::error::Coverage report generation failed: cobertura.xml not generated"
+          UNFORMATTED=$(gofmt -l .)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "The following files are not formatted:"
+            echo "$UNFORMATTED"
+            echo ""
+            echo "Run 'gofmt -s -w .' to fix"
             exit 1
           fi
+          echo "All Go files are properly formatted"
+
+  # ==================== Go Vet ====================
+  go-vet:
+    name: Go Vet
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run go vet
+        run: go vet ./...
+
+  # ==================== Go Unit Tests ====================
+  go-test:
+    name: Go Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Go cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Run tests
+        run: |
+          mkdir -p coverage
+          go test -v -race -coverprofile=coverage/coverage.out ./...
+
+      - name: Generate coverage report
+        if: always()
+        run: |
+          go tool cover -func=coverage/coverage.out > coverage/coverage-summary.txt
+
+          SUMMARY_FILE="go-coverage-summary.md"
+          echo "## Go Test Coverage" > "$SUMMARY_FILE"
           echo "" >> "$SUMMARY_FILE"
+
+          if [ -f coverage/coverage.out ]; then
+            TOTAL=$(go tool cover -func=coverage/coverage.out | tail -1 | awk '{print $NF}')
+            echo "| Metric | Coverage |" >> "$SUMMARY_FILE"
+            echo "|--------|----------|" >> "$SUMMARY_FILE"
+            echo "| Total Coverage | $TOTAL |" >> "$SUMMARY_FILE"
+            echo "" >> "$SUMMARY_FILE"
+
+            echo "| Package | Coverage |" >> "$SUMMARY_FILE"
+            echo "|---------|----------|" >> "$SUMMARY_FILE"
+
+            go tool cover -func=coverage/coverage.out | grep -E "^[^/]" | while read line; do
+              PKG=$(echo "$line" | awk '{print $1}')
+              COV=$(echo "$line" | awk '{print $NF}')
+              echo "| $PKG | $COV |" >> "$SUMMARY_FILE"
+            done
+
+            echo "" >> "$SUMMARY_FILE"
+            echo "> See coverage artifact for details" >> "$SUMMARY_FILE"
+          else
+            echo "> No coverage report generated" >> "$SUMMARY_FILE"
+            echo "::error::Coverage report generation failed"
+            exit 1
+          fi
+
           cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload coverage summary
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: rust-coverage-summary
-          path: rust-coverage-summary.md
+          name: go-coverage-summary
+          path: go-coverage-summary.md
           retention-days: 1
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: rust-coverage
+          name: go-coverage
           path: coverage/
           retention-days: 14
 
-  # ==================== Frontend Tests + Coverage ====================
-  frontend-test:
-    name: Frontend Tests & Coverage
+  # ==================== Go Build ====================
+  go-build:
+    name: Go Build
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -171,93 +167,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          node-version: "22"
+          go-version: ${{ env.GO_VERSION }}
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: "10"
-
-      - name: Install dependencies
-        working-directory: electron-app
-        run: pnpm install --frozen-lockfile
-
-      - name: TypeScript type check
-        working-directory: electron-app
-        run: pnpm typecheck
-
-      - name: Run frontend tests + coverage
-        working-directory: electron-app
-        run: pnpm vitest run --coverage --coverage.reporter=json-summary --coverage.reporter=text
-
-      - name: Generate frontend coverage summary
-        if: always()
-        working-directory: electron-app
+      - name: Build binary
         run: |
-          SUMMARY_FILE="frontend-coverage-summary.md"
-          echo "## Frontend Test Coverage" > "$SUMMARY_FILE"
-          echo "" >> "$SUMMARY_FILE"
-          if [ -f coverage/coverage-summary.json ]; then
-            node -e "
-              const fs = require('fs');
-              const data = JSON.parse(fs.readFileSync('coverage/coverage-summary.json', 'utf8'));
-              const total = data.total;
-              if (!total || total.lines === undefined) {
-                console.error('No total coverage data found');
-                process.exit(1);
-              }
-              const lines = total.lines.pct.toFixed(1);
-              const branches = total.branches.pct.toFixed(1);
-              const functions = total.functions.pct.toFixed(1);
-              const statements = total.statements.pct.toFixed(1);
-              const barLen = Math.round(total.lines.pct / 5);
-              const bar = '█'.repeat(barLen) + '░'.repeat(20 - barLen);
-              console.log('| Metric | Coverage |');
-              console.log('|--------|----------|');
-              console.log('| Line coverage | ' + bar + ' ' + lines + '% |');
-              console.log('| Branch coverage | ' + branches + '% |');
-              console.log('| Function coverage | ' + functions + '% |');
-              console.log('| Statement coverage | ' + statements + '% |');
-              console.log();
-              console.log('| File | Line Coverage |');
-              console.log('|------|--------------|');
-              for (const [file, fileData] of Object.entries(data)) {
-                if (file === 'total') continue;
-                const fileLines = fileData.lines.pct.toFixed(1);
-                const fileBarLen = Math.round(fileData.lines.pct / 5);
-                const fileBar = '█'.repeat(fileBarLen) + '░'.repeat(20 - fileBarLen);
-                const shortPath = file.replace(/^.*src\\//, 'src/');
-                console.log('| ' + shortPath + ' | ' + fileBar + ' ' + fileLines + '% |');
-              }
-            " >> "$SUMMARY_FILE"
-            echo "" >> "$SUMMARY_FILE"
-            echo "> See frontend coverage artifact for details" >> "$SUMMARY_FILE"
-            cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "> No frontend coverage report generated" >> "$SUMMARY_FILE"
-            echo "::error::Frontend coverage report generation failed"
-            cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
+          CGO_ENABLED=0 go build -o golem ./cmd/golem
+          echo "Build successful: $(du -h golem | cut -f1)"
 
-      - name: Upload frontend coverage summary
+      - name: Verify binary
+        run: |
+          ./golem version
+          ./golem --help
+
+      - name: Upload binary
         uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: frontend-coverage-summary
-          path: electron-app/frontend-coverage-summary.md
+          name: golem-binary
+          path: golem
           retention-days: 1
-
-      - name: Upload frontend coverage report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: frontend-coverage
-          path: electron-app/coverage/
-          retention-days: 14
 
   # ==================== Security Check ====================
   security:
@@ -269,31 +199,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Rust dependency audit
-        if: always()
-        continue-on-error: false
-        run: |
-          if [ -f Cargo.lock ]; then
-            cargo install cargo-audit --locked
-            cargo audit || echo "::warning::Rust dependencies have vulnerabilities"
-          else
-            echo "::notice::Cargo.lock not found, skipping Rust dependency audit"
-          fi
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Check hardcoded secrets
         run: |
           echo "Checking for hardcoded secrets..."
+          # Check for hardcoded secrets, excluding ${VAR} environment variable references
           if grep -rE "(api[_-]?key|apikey|secret|password|token)\s*[=:]\s*['\"][^'\"]{10,}['\"]" \
-            --include="*.rs" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.json" \
-            --exclude-dir="node_modules" --exclude-dir="target" --exclude-dir="dist" \
-            --exclude-dir="coverage" --exclude-dir="tests" --exclude-dir="__tests__" \
-            --exclude="*.test.*" --exclude="*.spec.*" --exclude="*_test.*" --exclude="test_*" \
-            .; then
+            --include="*.go" --include="*.yaml" --include="*.yml" --include="*.json" \
+            --exclude-dir="vendor" --exclude-dir=".git" \
+            --exclude="*.test.*" --exclude="*_test.go" \
+            . | grep -v '\$\{'; then
             echo "::error::Found hardcoded secrets, use environment variables or config files"
             exit 1
           fi
@@ -320,27 +239,57 @@ jobs:
           done
           echo "::notice::No sensitive files found"
 
+      - name: Go dependency audit
+        if: always()
+        continue-on-error: true
+        run: |
+          echo "Checking Go dependencies..."
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./... || echo "::warning::Go dependencies may have vulnerabilities"
+
+  # ==================== Quality Gate Script ====================
+  quality-gate:
+    name: Quality Gate Script
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Go cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Run quality gate script
+        run: |
+          chmod +x test.sh
+          bash test.sh
+
   # ==================== Gate Result Summary ====================
   gate-result:
     name: Gate Result
     runs-on: ubuntu-latest
-    needs: [rust-fmt, rust-clippy, rust-test, frontend-test, security]
+    needs: [go-fmt, go-vet, go-test, go-build, security, quality-gate]
     if: always()
 
     steps:
-      - name: Download Rust coverage summary
+      - name: Download coverage summary
         uses: actions/download-artifact@v4
         if: always()
         with:
-          name: rust-coverage-summary
-          path: coverage-artifacts
-        continue-on-error: true
-
-      - name: Download frontend coverage summary
-        uses: actions/download-artifact@v4
-        if: always()
-        with:
-          name: frontend-coverage-summary
+          name: go-coverage-summary
           path: coverage-artifacts
         continue-on-error: true
 
@@ -351,38 +300,35 @@ jobs:
           echo "============================================"
           echo ""
 
-          RUST_FMT="${{ needs.rust-fmt.result }}"
-          RUST_CLIPPY="${{ needs.rust-clippy.result }}"
-          RUST_TEST="${{ needs.rust-test.result }}"
-          FRONTEND_TEST="${{ needs.frontend-test.result }}"
+          GO_FMT="${{ needs.go-fmt.result }}"
+          GO_VET="${{ needs.go-vet.result }}"
+          GO_TEST="${{ needs.go-test.result }}"
+          GO_BUILD="${{ needs.go-build.result }}"
           SECURITY_RESULT="${{ needs.security.result }}"
+          QUALITY_GATE="${{ needs.quality-gate.result }}"
 
           echo "| Check | Status |"
           echo "|-------|--------|"
-          echo "| Rust Format | $RUST_FMT |"
-          echo "| Rust Clippy | $RUST_CLIPPY |"
-          echo "| Rust Tests & Coverage | $RUST_TEST |"
-          echo "| Frontend Tests & Coverage | $FRONTEND_TEST |"
+          echo "| Go Format | $GO_FMT |"
+          echo "| Go Vet | $GO_VET |"
+          echo "| Go Tests & Coverage | $GO_TEST |"
+          echo "| Go Build | $GO_BUILD |"
           echo "| Security Check | $SECURITY_RESULT |"
+          echo "| Quality Gate Script | $QUALITY_GATE |"
           echo ""
 
-          if [ -f coverage-artifacts/rust-coverage-summary.md ]; then
+          if [ -f coverage-artifacts/go-coverage-summary.md ]; then
             echo "---"
-            cat coverage-artifacts/rust-coverage-summary.md
+            cat coverage-artifacts/go-coverage-summary.md
             echo ""
           fi
 
-          if [ -f coverage-artifacts/frontend-coverage-summary.md ]; then
-            echo "---"
-            cat coverage-artifacts/frontend-coverage-summary.md
-            echo ""
-          fi
-
-          if [[ "$RUST_FMT" == "success" && \
-                "$RUST_CLIPPY" == "success" && \
-                "$RUST_TEST" == "success" && \
-                "$FRONTEND_TEST" == "success" && \
-                "$SECURITY_RESULT" == "success" ]]; then
+          if [[ "$GO_FMT" == "success" && \
+                "$GO_VET" == "success" && \
+                "$GO_TEST" == "success" && \
+                "$GO_BUILD" == "success" && \
+                "$SECURITY_RESULT" == "success" && \
+                "$QUALITY_GATE" == "success" ]]; then
             echo "All gate checks passed!"
             exit 0
           else
@@ -398,11 +344,12 @@ jobs:
             const fs = require('fs');
 
             const results = {
-              'Rust Format': '${{ needs.rust-fmt.result }}',
-              'Rust Clippy': '${{ needs.rust-clippy.result }}',
-              'Rust Tests & Coverage': '${{ needs.rust-test.result }}',
-              'Frontend Tests & Coverage': '${{ needs.frontend-test.result }}',
+              'Go Format': '${{ needs.go-fmt.result }}',
+              'Go Vet': '${{ needs.go-vet.result }}',
+              'Go Tests & Coverage': '${{ needs.go-test.result }}',
+              'Go Build': '${{ needs.go-build.result }}',
               'Security Check': '${{ needs.security.result }}',
+              'Quality Gate Script': '${{ needs.quality-gate.result }}',
             };
 
             const statusEmoji = (status) => status === 'success' ? '✅' : (status === 'skipped' ? '⏭️' : '❌');
@@ -415,12 +362,8 @@ jobs:
 
             let coverageSection = '';
             try {
-              const rustCov = fs.readFileSync('coverage-artifacts/rust-coverage-summary.md', 'utf8');
-              coverageSection += '\n' + rustCov + '\n';
-            } catch (e) {}
-            try {
-              const feCov = fs.readFileSync('coverage-artifacts/frontend-coverage-summary.md', 'utf8');
-              coverageSection += '\n' + feCov + '\n';
+              const goCov = fs.readFileSync('coverage-artifacts/go-coverage-summary.md', 'utf8');
+              coverageSection += '\n' + goCov + '\n';
             } catch (e) {}
 
             const body = `## Gate Check Result

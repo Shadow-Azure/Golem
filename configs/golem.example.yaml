@@ -1,0 +1,50 @@
+# Golem AI Agent 配置文件示例
+# 复制此文件到 ~/.golem/golem.yaml 并修改配置
+
+# 服务器配置
+server:
+  host: "127.0.0.1"
+  port: 9921
+
+# 大模型配置
+llm:
+  # 默认使用的模型提供商: openai, claude
+  default_provider: "openai"
+
+  # 模型提供商配置
+  providers:
+    openai:
+      api_key: "${OPENAI_API_KEY}"  # 支持环境变量
+      base_url: "https://api.openai.com/v1"
+      model: "gpt-4o"
+      temperature: 0.7
+      max_tokens: 4096
+
+    claude:
+      api_key: "${ANTHROPIC_API_KEY}"
+      base_url: "https://api.anthropic.com"
+      model: "claude-3-opus-20240229"
+      temperature: 0.7
+      max_tokens: 4096
+
+# 会话配置
+session:
+  max_history: 50        # 最大历史消息数
+  trim_to: 20            # 修剪到这个数量
+  idle_timeout: 30m      # 空闲超时时间
+  cleanup_interval: 5m   # 清理间隔
+
+# 飞书配置（可选）
+feishu:
+  enabled: false                          # 是否启用飞书
+  app_id: "${FEISHU_APP_ID}"             # 飞书应用 ID
+  app_secret: "${FEISHU_APP_SECRET}"     # 飞书应用密钥
+  verification_token: "${FEISHU_VERIFICATION_TOKEN}"  # 验证令牌
+  encrypt_key: "${FEISHU_ENCRYPT_KEY}"   # 加密密钥（可选）
+
+# 日志配置
+logging:
+  level: "info"    # debug, info, warn, error
+  format: "json"   # json, text
+  output: "file"   # stdout, file
+  file: "~/.golem/golem.log"

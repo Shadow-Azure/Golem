@@ -1,80 +1,87 @@
 #!/bin/bash
 set -e
 
-echo "============================================"
-echo "  Golem Local Quality Gate"
-echo "============================================"
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+echo -e "${GREEN}============================================${NC}"
+echo -e "${GREEN}  Golem Quality Gate${NC}"
+echo -e "${GREEN}============================================${NC}"
 echo ""
 
-FAILED=0
+# Track failures
+FAILURES=0
 
-# 1. Rust format check
-echo "[1/5] Rust format check..."
-if cargo fmt --all -- --check; then
-  echo "  ✅ cargo fmt passed"
+# Step 1: Go format check
+echo -e "${YELLOW}[1/5] Go Format Check${NC}"
+UNFORMATTED=$(gofmt -l .)
+if [ -n "$UNFORMATTED" ]; then
+    echo -e "${RED}  ❌ The following files are not formatted:${NC}"
+    echo "$UNFORMATTED"
+    echo ""
+    echo "  Run 'gofmt -s -w .' to fix"
+    FAILURES=$((FAILURES + 1))
 else
-  echo "  ❌ cargo fmt failed"
-  FAILED=1
+    echo -e "${GREEN}  ✅ All Go files are properly formatted${NC}"
 fi
 echo ""
 
-# 2. Rust Clippy
-echo "[2/5] Rust Clippy..."
-if cargo clippy -p golem-core -p golem-cli -p golem-daemon --all-targets -- -D warnings; then
-  echo "  ✅ clippy passed"
+# Step 2: Go vet
+echo -e "${YELLOW}[2/5] Go Vet${NC}"
+if go vet ./...; then
+    echo -e "${GREEN}  ✅ Go vet passed${NC}"
 else
-  echo "  ❌ clippy failed"
-  FAILED=1
+    echo -e "${RED}  ❌ Go vet failed${NC}"
+    FAILURES=$((FAILURES + 1))
 fi
 echo ""
 
-# 3. Rust unit tests
-echo "[3/5] Rust unit tests..."
-if cargo test -p golem-core; then
-  echo "  ✅ cargo test passed"
+# Step 3: Go tests
+echo -e "${YELLOW}[3/5] Go Tests${NC}"
+if go test -v -race ./...; then
+    echo -e "${GREEN}  ✅ All Go tests passed${NC}"
 else
-  echo "  ❌ cargo test failed"
-  FAILED=1
+    echo -e "${RED}  ❌ Go tests failed${NC}"
+    FAILURES=$((FAILURES + 1))
 fi
 echo ""
 
-# 4. Frontend type check
-echo "[4/5] Frontend type check..."
-if command -v pnpm &>/dev/null && [ -f electron-app/package.json ]; then
-  cd electron-app
-  if pnpm install --frozen-lockfile 2>/dev/null && pnpm typecheck; then
-    echo "  ✅ typecheck passed"
-  else
-    echo "  ❌ typecheck failed"
-    FAILED=1
-  fi
-  cd ..
+# Step 4: Go build
+echo -e "${YELLOW}[4/5] Go Build${NC}"
+if CGO_ENABLED=0 go build -o /tmp/golem-test ./cmd/golem; then
+    echo -e "${GREEN}  ✅ Go build succeeded${NC}"
+    rm -f /tmp/golem-test
 else
-  echo "  ⏭️  skipped (pnpm not installed or no electron-app)"
+    echo -e "${RED}  ❌ Go build failed${NC}"
+    FAILURES=$((FAILURES + 1))
 fi
 echo ""
 
-# 5. Frontend unit tests
-echo "[5/5] Frontend unit tests..."
-if command -v pnpm &>/dev/null && [ -f electron-app/package.json ]; then
-  cd electron-app
-  if pnpm vitest run 2>/dev/null; then
-    echo "  ✅ vitest passed"
-  else
-    echo "  ❌ vitest failed"
-    FAILED=1
-  fi
-  cd ..
+# Step 5: E2E tests
+echo -e "${YELLOW}[5/5] E2E Tests${NC}"
+if [ -f "tests/e2e-cli.sh" ]; then
+    if bash tests/e2e-cli.sh; then
+        echo -e "${GREEN}  ✅ E2E tests passed${NC}"
+    else
+        echo -e "${RED}  ❌ E2E tests failed${NC}"
+        FAILURES=$((FAILURES + 1))
+    fi
 else
-  echo "  ⏭️  skipped (pnpm not installed or no electron-app)"
+    echo -e "${YELLOW}  ⏭️  E2E test script not found, skipping${NC}"
 fi
 echo ""
 
-echo "============================================"
-if [ "$FAILED" -eq 0 ]; then
-  echo "  ✅ All checks passed!"
-  exit 0
+# Summary
+echo -e "${GREEN}============================================${NC}"
+if [ $FAILURES -eq 0 ]; then
+    echo -e "${GREEN}  ✅ All quality checks passed!${NC}"
+    echo -e "${GREEN}============================================${NC}"
+    exit 0
 else
-  echo "  ❌ Some checks failed"
-  exit 1
+    echo -e "${RED}  ❌ $FAILURES quality check(s) failed${NC}"
+    echo -e "${GREEN}============================================${NC}"
+    exit 1
 fi
