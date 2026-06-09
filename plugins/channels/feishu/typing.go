@@ -8,13 +8,6 @@ import (
 	"time"
 )
 
-// Feishu rate limit error codes.
-const (
-	ErrCodeRateLimit     = 99991400
-	ErrCodeQuotaExceeded = 99991403
-	ErrCodeHTTP429       = 429
-)
-
 // TypingManagerConfig configures the TypingManager.
 type TypingManagerConfig struct {
 	MaxAge           time.Duration                                         // Max message age to show typing (default 2min)
@@ -33,12 +26,13 @@ type TypingState struct {
 
 // TypingManager manages typing indicators for Feishu messages.
 type TypingManager struct {
-	config       TypingManagerConfig
-	mu           sync.Mutex
-	states       map[string]*TypingState // sessionID -> state
-	consecutiveF int
-	tripped      bool
-	logger       *slog.Logger
+	config               TypingManagerConfig
+	mu                   sync.Mutex
+	states               map[string]*TypingState // sessionID -> state
+	consecutiveFailures  int
+	tripped              bool
+	done                 chan struct{}
+	logger               *slog.Logger
 }
 
 // NewTypingManager creates a new TypingManager.
@@ -52,10 +46,55 @@ func NewTypingManager(cfg TypingManagerConfig) *TypingManager {
 	if cfg.MaxFailures == 0 {
 		cfg.MaxFailures = 2
 	}
-	return &TypingManager{
+	m := &TypingManager{
 		config: cfg,
 		states: make(map[string]*TypingState),
+		done:   make(chan struct{}),
 		logger: slog.Default().With("component", "typing_manager"),
+	}
+	go m.cleanup()
+	return m
+}
+
+// Stop signals the cleanup goroutine to exit.
+func (m *TypingManager) Stop() {
+	close(m.done)
+}
+
+// cleanup periodically removes expired typing states.
+func (m *TypingManager) cleanup() {
+	ticker := time.NewTicker(m.config.TTLTimeout)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.done:
+			return
+		case <-ticker.C:
+			m.mu.Lock()
+			cutoff := time.Now().Add(-m.config.TTLTimeout)
+			var expired []TypingState
+			for sessionID, state := range m.states {
+				if state.StartTime.Before(cutoff) {
+					expired = append(expired, *state)
+					delete(m.states, sessionID)
+				}
+			}
+			m.mu.Unlock()
+
+			// Call OnRemoveReaction outside the lock.
+			for _, state := range expired {
+				if state.ReactionID != "" {
+					if err := m.config.OnRemoveReaction(context.Background(), state.MessageID, state.ReactionID); err != nil {
+						m.logger.Warn("failed to remove expired typing reaction",
+							"message_id", state.MessageID,
+							"reaction_id", state.ReactionID,
+							"error", err,
+						)
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -68,15 +107,16 @@ func (m *TypingManager) StartTyping(ctx context.Context, sessionID string, messa
 // If messageCreateTimeMs is 0, the current time is used.
 func (m *TypingManager) StartTypingWithTime(ctx context.Context, sessionID string, messageID string, messageCreateTimeMs int64) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	// Circuit breaker check
 	if m.tripped {
+		m.mu.Unlock()
 		return fmt.Errorf("typing circuit breaker tripped")
 	}
 
 	// Dedup: if already showing typing for this session, skip
 	if state, exists := m.states[sessionID]; exists && state.ReactionID != "" {
+		m.mu.Unlock()
 		return nil
 	}
 
@@ -89,18 +129,26 @@ func (m *TypingManager) StartTypingWithTime(ctx context.Context, sessionID strin
 				"age", msgAge,
 				"max_age", m.config.MaxAge,
 			)
+			m.mu.Unlock()
 			return nil
 		}
 	}
 
-	// Add reaction
+	m.mu.Unlock()
+
+	// Add reaction outside the lock to avoid blocking during network I/O.
 	reactionID, err := m.config.OnAddReaction(ctx, messageID, "Typing")
+
+	// Re-acquire lock to update state.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if err != nil {
-		m.consecutiveF++
-		if m.consecutiveF >= m.config.MaxFailures {
+		m.consecutiveFailures++
+		if m.consecutiveFailures >= m.config.MaxFailures {
 			m.tripped = true
 			m.logger.Warn("typing circuit breaker tripped",
-				"failures", m.consecutiveF,
+				"failures", m.consecutiveFailures,
 				"error", err,
 			)
 		}
@@ -108,7 +156,7 @@ func (m *TypingManager) StartTypingWithTime(ctx context.Context, sessionID strin
 	}
 
 	// Reset failure counter on success
-	m.consecutiveF = 0
+	m.consecutiveFailures = 0
 
 	m.states[sessionID] = &TypingState{
 		MessageID:  messageID,
@@ -122,20 +170,25 @@ func (m *TypingManager) StartTypingWithTime(ctx context.Context, sessionID strin
 // StopTyping stops showing the typing indicator.
 func (m *TypingManager) StopTyping(ctx context.Context, sessionID string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	state, exists := m.states[sessionID]
 	if !exists {
+		m.mu.Unlock()
 		return nil
 	}
 
+	// Copy state and remove from map under lock.
+	stateCopy := *state
 	delete(m.states, sessionID)
 
-	if state.ReactionID == "" {
+	m.mu.Unlock()
+
+	if stateCopy.ReactionID == "" {
 		return nil
 	}
 
-	if err := m.config.OnRemoveReaction(ctx, state.MessageID, state.ReactionID); err != nil {
+	// Remove reaction outside the lock.
+	if err := m.config.OnRemoveReaction(ctx, stateCopy.MessageID, stateCopy.ReactionID); err != nil {
 		m.logger.Warn("failed to remove typing reaction",
 			"session_id", sessionID,
 			"error", err,
@@ -151,5 +204,5 @@ func (m *TypingManager) Reset() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.tripped = false
-	m.consecutiveF = 0
+	m.consecutiveFailures = 0
 }
