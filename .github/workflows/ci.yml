@@ -207,11 +207,12 @@ jobs:
       - name: Check hardcoded secrets
         run: |
           echo "Checking for hardcoded secrets..."
+          # Check for hardcoded secrets, excluding ${VAR} environment variable references
           if grep -rE "(api[_-]?key|apikey|secret|password|token)\s*[=:]\s*['\"][^'\"]{10,}['\"]" \
             --include="*.go" --include="*.yaml" --include="*.yml" --include="*.json" \
             --exclude-dir="vendor" --exclude-dir=".git" \
             --exclude="*.test.*" --exclude="*_test.go" \
-            .; then
+            . | grep -v '\$\{'; then
             echo "::error::Found hardcoded secrets, use environment variables or config files"
             exit 1
           fi
