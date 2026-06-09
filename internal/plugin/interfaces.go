@@ -79,23 +79,23 @@ type ToolPlugin interface {
 // streaming reply output (e.g., Feishu Card Kit).
 type StreamingCapable interface {
 	// CreateStreamReply creates a streaming reply session.
-	CreateStreamReply(sessionID string, opts StreamReplyOptions) (*StreamSession, error)
+	CreateStreamReply(ctx context.Context, sessionID string, opts StreamReplyOptions) (*StreamSession, error)
 
 	// SendDelta sends a streaming delta update to the reply session.
-	SendDelta(session *StreamSession, delta string) error
+	SendDelta(ctx context.Context, session *StreamSession, delta string) error
 
 	// FinishStream completes the streaming reply.
-	FinishStream(session *StreamSession) error
+	FinishStream(ctx context.Context, session *StreamSession) error
 }
 
 // TypingCapable is an optional interface for channels that support
 // typing indicators (e.g., Feishu emoji reactions).
 type TypingCapable interface {
 	// StartTyping begins showing a typing indicator for the given message.
-	StartTyping(sessionID string, messageID string) error
+	StartTyping(ctx context.Context, sessionID string, messageID string) error
 
 	// StopTyping stops showing the typing indicator.
-	StopTyping(sessionID string) error
+	StopTyping(ctx context.Context, sessionID string) error
 }
 
 // StreamReplyOptions contains options for creating a streaming reply.

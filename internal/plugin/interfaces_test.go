@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"testing"
 )
 
@@ -11,17 +12,17 @@ type mockStreamingChannel struct {
 	finished bool
 }
 
-func (m *mockStreamingChannel) CreateStreamReply(sessionID string, opts StreamReplyOptions) (*StreamSession, error) {
+func (m *mockStreamingChannel) CreateStreamReply(ctx context.Context, sessionID string, opts StreamReplyOptions) (*StreamSession, error) {
 	m.created = true
 	return &StreamSession{SessionID: sessionID, CardID: "test-card-id"}, nil
 }
 
-func (m *mockStreamingChannel) SendDelta(session *StreamSession, delta string) error {
+func (m *mockStreamingChannel) SendDelta(ctx context.Context, session *StreamSession, delta string) error {
 	m.deltas = append(m.deltas, delta)
 	return nil
 }
 
-func (m *mockStreamingChannel) FinishStream(session *StreamSession) error {
+func (m *mockStreamingChannel) FinishStream(ctx context.Context, session *StreamSession) error {
 	m.finished = true
 	return nil
 }
@@ -32,53 +33,72 @@ type mockTypingChannel struct {
 	stopped bool
 }
 
-func (m *mockTypingChannel) StartTyping(sessionID string, messageID string) error {
+func (m *mockTypingChannel) StartTyping(ctx context.Context, sessionID string, messageID string) error {
 	m.started = true
 	return nil
 }
 
-func (m *mockTypingChannel) StopTyping(sessionID string) error {
+func (m *mockTypingChannel) StopTyping(ctx context.Context, sessionID string) error {
 	m.stopped = true
 	return nil
 }
 
 func TestStreamingCapable_TypeAssertion(t *testing.T) {
-	var ch interface{} = &mockStreamingChannel{}
+	ctx := context.Background()
+	mock := &mockStreamingChannel{}
+	var ch interface{} = mock
 	sc, ok := ch.(StreamingCapable)
 	if !ok {
 		t.Fatal("expected type assertion to StreamingCapable to succeed")
 	}
 
-	session, err := sc.CreateStreamReply("sess1", StreamReplyOptions{MessageID: "msg1"})
+	session, err := sc.CreateStreamReply(ctx, "sess1", StreamReplyOptions{MessageID: "msg1"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if session.CardID != "test-card-id" {
 		t.Errorf("expected card ID 'test-card-id', got '%s'", session.CardID)
 	}
-
-	if err := sc.SendDelta(session, "hello"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if !mock.created {
+		t.Error("expected mock.created to be true after CreateStreamReply")
 	}
 
-	if err := sc.FinishStream(session); err != nil {
+	if err := sc.SendDelta(ctx, session, "hello"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.deltas) != 1 || mock.deltas[0] != "hello" {
+		t.Errorf("expected mock.deltas to contain ['hello'], got %v", mock.deltas)
+	}
+
+	if err := sc.FinishStream(ctx, session); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !mock.finished {
+		t.Error("expected mock.finished to be true after FinishStream")
 	}
 }
 
 func TestTypingCapable_TypeAssertion(t *testing.T) {
-	var ch interface{} = &mockTypingChannel{}
+	ctx := context.Background()
+	mock := &mockTypingChannel{}
+	var ch interface{} = mock
 	tc, ok := ch.(TypingCapable)
 	if !ok {
 		t.Fatal("expected type assertion to TypingCapable to succeed")
 	}
 
-	if err := tc.StartTyping("sess1", "msg1"); err != nil {
+	if err := tc.StartTyping(ctx, "sess1", "msg1"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if !mock.started {
+		t.Error("expected mock.started to be true after StartTyping")
+	}
 
-	if err := tc.StopTyping("sess1"); err != nil {
+	if err := tc.StopTyping(ctx, "sess1"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if !mock.stopped {
+		t.Error("expected mock.stopped to be true after StopTyping")
 	}
 }
 
