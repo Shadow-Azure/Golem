@@ -17,6 +17,16 @@ func projectRoot(t *testing.T) string {
 }
 
 func TestLoadConfig_FromFile(t *testing.T) {
+	// Set test environment variables
+	os.Setenv("OPENAI_API_KEY", "test-key")
+	os.Setenv("FEISHU_APP_ID", "test-app-id")
+	os.Setenv("FEISHU_APP_SECRET", "test-app-secret")
+	defer func() {
+		os.Unsetenv("OPENAI_API_KEY")
+		os.Unsetenv("FEISHU_APP_ID")
+		os.Unsetenv("FEISHU_APP_SECRET")
+	}()
+
 	configPath := filepath.Join(projectRoot(t), "configs", "test.yaml")
 	config, err := Load(configPath)
 	if err != nil {
