@@ -75,3 +75,46 @@ func TestOpenAIProvider_SupportsStreaming(t *testing.T) {
 		t.Error("OpenAI should support streaming")
 	}
 }
+
+func TestStripThinkingTags(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "no thinking tags",
+			input:    "Hello, world!",
+			expected: "Hello, world!",
+		},
+		{
+			name:     "single thinking block",
+			input:    "<think>\nreasoning\n</think>\n\nActual response",
+			expected: "Actual response",
+		},
+		{
+			name:     "multiple thinking blocks",
+			input:    "<think>\nfirst\n</think>\n\nMiddle\n<think>\nsecond\n</think>\n\nEnd",
+			expected: "Middle\n\nEnd",
+		},
+		{
+			name:     "empty thinking block",
+			input:    "<think></think>\n\nResponse",
+			expected: "Response",
+		},
+		{
+			name:     "thinking block with no content after",
+			input:    "<think>\nonly thinking\n</think>",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := StripThinkingTags(tt.input)
+			if result != tt.expected {
+				t.Errorf("expected %q, got %q", tt.expected, result)
+			}
+		})
+	}
+}

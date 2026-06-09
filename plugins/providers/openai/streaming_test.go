@@ -40,3 +40,70 @@ func TestStreamParser_EmptyInput(t *testing.T) {
 		}
 	}
 }
+
+func TestThinkingFilter_NoThinking(t *testing.T) {
+	filter := NewThinkingFilter()
+	result := filter.Filter("Hello, world!")
+	if result != "Hello, world!" {
+		t.Errorf("expected 'Hello, world!', got '%s'", result)
+	}
+}
+
+func TestThinkingFilter_SingleChunk(t *testing.T) {
+	filter := NewThinkingFilter()
+	result := filter.Filter("<think>\nreasoning\n</think>\n\nActual response")
+	if result != "\n\nActual response" {
+		t.Errorf("expected '\\n\\nActual response', got '%s'", result)
+	}
+}
+
+func TestThinkingFilter_SplitAcrossChunks(t *testing.T) {
+	filter := NewThinkingFilter()
+
+	// First chunk: start of thinking block
+	result1 := filter.Filter("<think>\nreasoning")
+	if result1 != "" {
+		t.Errorf("expected empty, got '%s'", result1)
+	}
+
+	// Second chunk: end of thinking block and actual content
+	result2 := filter.Filter("\n</think>\n\nActual response")
+	if result2 != "\n\nActual response" {
+		t.Errorf("expected '\\n\\nActual response', got '%s'", result2)
+	}
+}
+
+func TestThinkingFilter_MultipleBlocks(t *testing.T) {
+	filter := NewThinkingFilter()
+
+	result1 := filter.Filter("Start ")
+	if result1 != "Start " {
+		t.Errorf("expected 'Start ', got '%s'", result1)
+	}
+
+	result2 := filter.Filter("<think>\nfirst\n</think>\n\nMiddle ")
+	if result2 != "\n\nMiddle " {
+		t.Errorf("expected '\\n\\nMiddle ', got '%s'", result2)
+	}
+
+	result3 := filter.Filter("<think>\nsecond\n</think>\n\nEnd")
+	if result3 != "\n\nEnd" {
+		t.Errorf("expected '\\n\\nEnd', got '%s'", result3)
+	}
+}
+
+func TestThinkingFilter_PartialTag(t *testing.T) {
+	filter := NewThinkingFilter()
+
+	// Send partial "<think>" tag
+	result1 := filter.Filter("Hello <th")
+	if result1 != "Hello " {
+		t.Errorf("expected 'Hello ', got '%s'", result1)
+	}
+
+	// Complete the tag
+	result2 := filter.Filter("ink>reasoning</think>\n\nWorld")
+	if result2 != "\n\nWorld" {
+		t.Errorf("expected '\\n\\nWorld', got '%s'", result2)
+	}
+}

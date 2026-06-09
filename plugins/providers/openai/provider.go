@@ -8,6 +8,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"github.com/Shadow-Azure/Golem/internal/core"
 	"github.com/Shadow-Azure/Golem/internal/plugin"
@@ -87,7 +89,7 @@ func (p *Provider) Chat(ctx context.Context, messages []core.Message, config cor
 	}
 
 	return &core.ChatResponse{
-		Content: completion.Choices[0].Message.Content,
+		Content: StripThinkingTags(completion.Choices[0].Message.Content),
 		Usage: core.Usage{
 			PromptTokens:     completion.Usage.PromptTokens,
 			CompletionTokens: completion.Usage.CompletionTokens,
@@ -124,12 +126,29 @@ func (p *Provider) ChatStream(ctx context.Context, messages []core.Message, conf
 		defer resp.Body.Close()
 
 		parser := NewStreamParser(resp.Body)
+		filter := NewThinkingFilter()
 		for chunk := range parser.Parse() {
+			if chunk.Done || chunk.Error != nil {
+				select {
+				case <-ctx.Done():
+					chunks <- core.StreamChunk{Error: ctx.Err()}
+					return
+				case chunks <- chunk:
+				}
+				continue
+			}
+
+			// Filter out thinking tags from stream content
+			filtered := filter.Filter(chunk.Content)
+			if filtered == "" {
+				continue
+			}
+
 			select {
 			case <-ctx.Done():
 				chunks <- core.StreamChunk{Error: ctx.Err()}
 				return
-			case chunks <- chunk:
+			case chunks <- core.StreamChunk{Content: filtered}:
 			}
 		}
 	}()
@@ -198,6 +217,24 @@ func (p *Provider) sendStreamingRequest(ctx context.Context, path string, reques
 	}
 
 	return resp, nil
+}
+
+// thinkingTagRegex matches <think>...</think> blocks (including multiline).
+var thinkingTagRegex = regexp.MustCompile(`(?s)<think>.*?</think>`)
+
+// StripThinkingTags removes <think>...</think> blocks from LLM output.
+// Some models (e.g., MiniMax, DeepSeek) return thinking blocks in their response,
+// which should not be shown to end users.
+func StripThinkingTags(content string) string {
+	// Remove thinking blocks
+	result := thinkingTagRegex.ReplaceAllString(content, "")
+	// Clean up extra whitespace left behind
+	result = strings.TrimSpace(result)
+	// Collapse multiple newlines into at most two
+	for strings.Contains(result, "\n\n\n") {
+		result = strings.ReplaceAll(result, "\n\n\n", "\n\n")
+	}
+	return result
 }
 
 // Compile-time check that Provider implements ProviderPlugin.
