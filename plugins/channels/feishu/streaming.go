@@ -12,12 +12,12 @@ import (
 
 // StreamingManagerConfig configures the StreamingManager.
 type StreamingManagerConfig struct {
-	MinUpdateInterval time.Duration                                         // Min interval between card updates (default 160ms)
-	MinCharsDelta     int                                                   // Min char change before triggering update (default 18)
+	MinUpdateInterval time.Duration                                                       // Min interval between card updates (default 160ms)
+	MinCharsDelta     int                                                                 // Min char change before triggering update (default 18)
 	OnCreateCard      func(ctx context.Context, chatID, messageID string) (string, error) // Create card, return cardID
-	OnUpdateCard      func(ctx context.Context, cardID, content string) error              // Update card content
-	OnCloseCard       func(ctx context.Context, cardID, content string) error              // Finalize card
-	OnFallback        func(ctx context.Context, sessionID, content string) error           // Fallback when card fails
+	OnUpdateCard      func(ctx context.Context, cardID, content string) error             // Update card content
+	OnCloseCard       func(ctx context.Context, cardID, content string) error             // Finalize card
+	OnFallback        func(ctx context.Context, sessionID, content string) error          // Fallback when card fails
 }
 
 // streamingSession holds state for an active streaming reply.

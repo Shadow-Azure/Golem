@@ -28,18 +28,18 @@ type FeishuConfig struct {
 
 // FeishuPlugin implements the ChannelPlugin interface for Feishu messaging.
 type FeishuPlugin struct {
-	config      FeishuConfig
-	client      *lark.Client
-	wsCli       *larkws.Client
-	engine      core.EngineInterface
-	provider    plugin.ProviderPlugin
-	logger      *slog.Logger
-	dedup       *Deduplicator
-	started     bool
-	typingMgr   *TypingManager
-	streamMgr   *StreamingManager
-	typingOnce  sync.Once
-	streamOnce  sync.Once
+	config     FeishuConfig
+	client     *lark.Client
+	wsCli      *larkws.Client
+	engine     core.EngineInterface
+	provider   plugin.ProviderPlugin
+	logger     *slog.Logger
+	dedup      *Deduplicator
+	started    bool
+	typingMgr  *TypingManager
+	streamMgr  *StreamingManager
+	typingOnce sync.Once
+	streamOnce sync.Once
 }
 
 // NewFeishuPlugin creates a new FeishuPlugin with the given configuration.

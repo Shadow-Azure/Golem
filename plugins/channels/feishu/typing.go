@@ -10,9 +10,9 @@ import (
 
 // TypingManagerConfig configures the TypingManager.
 type TypingManagerConfig struct {
-	MaxAge           time.Duration                                         // Max message age to show typing (default 2min)
-	TTLTimeout       time.Duration                                         // Auto-remove typing after this duration (default 60s)
-	MaxFailures      int                                                   // Max consecutive failures before circuit breaker trips (default 2)
+	MaxAge           time.Duration                                                          // Max message age to show typing (default 2min)
+	TTLTimeout       time.Duration                                                          // Auto-remove typing after this duration (default 60s)
+	MaxFailures      int                                                                    // Max consecutive failures before circuit breaker trips (default 2)
 	OnAddReaction    func(ctx context.Context, messageID, emojiType string) (string, error) // Callback to add emoji reaction
 	OnRemoveReaction func(ctx context.Context, messageID, reactionID string) error          // Callback to remove emoji reaction
 }
@@ -26,13 +26,13 @@ type TypingState struct {
 
 // TypingManager manages typing indicators for Feishu messages.
 type TypingManager struct {
-	config               TypingManagerConfig
-	mu                   sync.Mutex
-	states               map[string]*TypingState // sessionID -> state
-	consecutiveFailures  int
-	tripped              bool
-	done                 chan struct{}
-	logger               *slog.Logger
+	config              TypingManagerConfig
+	mu                  sync.Mutex
+	states              map[string]*TypingState // sessionID -> state
+	consecutiveFailures int
+	tripped             bool
+	done                chan struct{}
+	logger              *slog.Logger
 }
 
 // NewTypingManager creates a new TypingManager.
