@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
@@ -27,16 +28,18 @@ type FeishuConfig struct {
 
 // FeishuPlugin implements the ChannelPlugin interface for Feishu messaging.
 type FeishuPlugin struct {
-	config    FeishuConfig
-	client    *lark.Client
-	wsCli     *larkws.Client
-	engine    core.EngineInterface
-	provider  plugin.ProviderPlugin
-	logger    *slog.Logger
-	dedup     *Deduplicator
-	started   bool
-	typingMgr *TypingManager
-	streamMgr *StreamingManager
+	config      FeishuConfig
+	client      *lark.Client
+	wsCli       *larkws.Client
+	engine      core.EngineInterface
+	provider    plugin.ProviderPlugin
+	logger      *slog.Logger
+	dedup       *Deduplicator
+	started     bool
+	typingMgr   *TypingManager
+	streamMgr   *StreamingManager
+	typingOnce  sync.Once
+	streamOnce  sync.Once
 }
 
 // NewFeishuPlugin creates a new FeishuPlugin with the given configuration.
@@ -99,6 +102,9 @@ func (p *FeishuPlugin) Start() error {
 
 // Stop stops the plugin gracefully.
 func (p *FeishuPlugin) Stop() error {
+	if p.typingMgr != nil {
+		p.typingMgr.Stop()
+	}
 	p.dedup.Stop()
 	p.started = false
 	p.logger.Info("Feishu plugin stopped")
@@ -229,8 +235,9 @@ func (p *FeishuPlugin) handleMessage(ctx context.Context, event *larkim.P2Messag
 
 	// Add user message to session
 	p.engine.GetSessionManager().AddMessage(session.ID, core.Message{
-		Role:    "user",
-		Content: content,
+		Role:      "user",
+		Content:   content,
+		Timestamp: time.Now(),
 	})
 
 	// Get session history
@@ -280,9 +287,11 @@ func (p *FeishuPlugin) handleStreamingMessage(ctx context.Context, sessionID, ch
 	}
 
 	fullResponse := ""
+	var streamErr error
 	for chunk := range streamCh {
 		if chunk.Error != nil {
 			p.logger.Error("stream chunk error", "error", chunk.Error)
+			streamErr = chunk.Error
 			break
 		}
 		if chunk.Done {
@@ -305,7 +314,7 @@ func (p *FeishuPlugin) handleStreamingMessage(ctx context.Context, sessionID, ch
 		Timestamp: time.Now(),
 	})
 
-	return nil
+	return streamErr
 }
 
 // handleNonStreamingMessage handles a message using non-streaming LLM call.
@@ -327,9 +336,7 @@ func (p *FeishuPlugin) handleNonStreamingMessage(ctx context.Context, sessionID,
 
 // StartTyping begins showing a typing indicator for the given message.
 func (p *FeishuPlugin) StartTyping(ctx context.Context, sessionID string, messageID string) error {
-	if p.typingMgr == nil {
-		p.initTypingManager()
-	}
+	p.typingOnce.Do(p.initTypingManager)
 	return p.typingMgr.StartTyping(ctx, sessionID, messageID)
 }
 
@@ -392,9 +399,7 @@ func (p *FeishuPlugin) initTypingManager() {
 
 // CreateStreamReply creates a Feishu Card Kit streaming reply.
 func (p *FeishuPlugin) CreateStreamReply(ctx context.Context, sessionID string, opts plugin.StreamReplyOptions) (*plugin.StreamSession, error) {
-	if p.streamMgr == nil {
-		p.initStreamingManager()
-	}
+	p.streamOnce.Do(p.initStreamingManager)
 	return p.streamMgr.CreateStreamReply(ctx, sessionID, opts)
 }
 
@@ -423,7 +428,7 @@ func (p *FeishuPlugin) initStreamingManager() {
 			if p.client == nil {
 				return "", fmt.Errorf("feishu client not initialized")
 			}
-			cardJSON := `{"config":{"wide_screen_mode":true},"header":{"title":{"tag":"plain_text","content":"Golem"},"template":"blue"},"elements":[{"tag":"markdown","content":"⏳ thinking..."}]}`
+			cardJSON := buildFeishuCardJSON("⏳ thinking...")
 			req := larkim.NewCreateMessageReqBuilder().
 				ReceiveIdType("chat_id").
 				Body(larkim.NewCreateMessageReqBodyBuilder().
@@ -446,7 +451,7 @@ func (p *FeishuPlugin) initStreamingManager() {
 			if p.client == nil {
 				return fmt.Errorf("feishu client not initialized")
 			}
-			cardJSON := fmt.Sprintf(`{"config":{"wide_screen_mode":true},"header":{"title":{"tag":"plain_text","content":"Golem"},"template":"blue"},"elements":[{"tag":"markdown","content":"%s"}]}`, escapeJSON(content))
+			cardJSON := buildFeishuCardJSON(content)
 			req := larkim.NewPatchMessageReqBuilder().
 				MessageId(cardID).
 				Body(larkim.NewPatchMessageReqBodyBuilder().
@@ -468,7 +473,7 @@ func (p *FeishuPlugin) initStreamingManager() {
 			if p.client == nil {
 				return fmt.Errorf("feishu client not initialized")
 			}
-			cardJSON := fmt.Sprintf(`{"config":{"wide_screen_mode":true},"header":{"title":{"tag":"plain_text","content":"Golem"},"template":"blue"},"elements":[{"tag":"markdown","content":"%s"}]}`, escapeJSON(content))
+			cardJSON := buildFeishuCardJSON(content)
 			req := larkim.NewPatchMessageReqBuilder().
 				MessageId(cardID).
 				Body(larkim.NewPatchMessageReqBodyBuilder().
@@ -489,6 +494,11 @@ func (p *FeishuPlugin) initStreamingManager() {
 			return p.SendMessage(sessionID, content)
 		},
 	})
+}
+
+// buildFeishuCardJSON builds a Feishu interactive card JSON with the given markdown content.
+func buildFeishuCardJSON(content string) string {
+	return fmt.Sprintf(`{"config":{"wide_screen_mode":true},"header":{"title":{"tag":"plain_text","content":"Golem"},"template":"blue"},"elements":[{"tag":"markdown","content":"%s"}]}`, escapeJSON(content))
 }
 
 // derefString safely dereferences a string pointer.
