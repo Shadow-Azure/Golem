@@ -23,7 +23,7 @@ func runForeground() {
 	}))
 	slog.SetDefault(logger)
 
-	logger.Info("starting Golem AI Agent", "version", Version)
+	logger.Info("Starting Golem AI Agent v" + Version)
 
 	// Determine config path
 	configPath := cfgFile
@@ -49,30 +49,48 @@ func runForeground() {
 	// Create plugin manager
 	pm := plugin.NewManager()
 
-	// Register OpenAI provider
-	if openaiConfig, ok := cfg.LLM.Providers["openai"]; ok {
-		openaiProv := openaiPlugin.NewProvider(openaiPlugin.ProviderConfig{
-			APIKey:      openaiConfig.APIKey,
-			BaseURL:     openaiConfig.BaseURL,
-			Model:       openaiConfig.Model,
-			Temperature: openaiConfig.Temperature,
-			MaxTokens:   openaiConfig.MaxTokens,
-		})
-		if err := pm.LoadPlugin("openai", openaiProv); err != nil {
-			logger.Error("failed to load OpenAI provider", "error", err)
-		}
-	}
+	// Register LLM providers
+	var defaultProvider plugin.ProviderPlugin
 
-	// Register Claude provider
-	if claudeConfig, ok := cfg.LLM.Providers["claude"]; ok {
-		claudeProv := claudePlugin.NewProvider(claudePlugin.ProviderConfig{
-			APIKey:    claudeConfig.APIKey,
-			BaseURL:   claudeConfig.BaseURL,
-			Model:     claudeConfig.Model,
-			MaxTokens: claudeConfig.MaxTokens,
-		})
-		if err := pm.LoadPlugin("claude", claudeProv); err != nil {
-			logger.Error("failed to load Claude provider", "error", err)
+	for providerName, providerConfig := range cfg.LLM.Providers {
+		switch providerName {
+		case "openai", "minimax": // MiniMax uses OpenAI-compatible API
+			provider := openaiPlugin.NewProvider(openaiPlugin.ProviderConfig{
+				APIKey:      providerConfig.APIKey,
+				BaseURL:     providerConfig.BaseURL,
+				Model:       providerConfig.Model,
+				Temperature: providerConfig.Temperature,
+				MaxTokens:   providerConfig.MaxTokens,
+			})
+			if err := pm.LoadPlugin(providerName, provider); err != nil {
+				logger.Error("failed to load provider", "provider", providerName, "error", err)
+			} else {
+				logger.Info("loaded provider", "provider", providerName)
+				// Set as default if this is the configured default provider
+				if providerName == cfg.LLM.DefaultProvider {
+					defaultProvider = provider
+				}
+			}
+
+		case "claude":
+			provider := claudePlugin.NewProvider(claudePlugin.ProviderConfig{
+				APIKey:    providerConfig.APIKey,
+				BaseURL:   providerConfig.BaseURL,
+				Model:     providerConfig.Model,
+				MaxTokens: providerConfig.MaxTokens,
+			})
+			if err := pm.LoadPlugin("claude", provider); err != nil {
+				logger.Error("failed to load Claude provider", "error", err)
+			} else {
+				logger.Info("loaded provider", "provider", "claude")
+				// Set as default if this is the configured default provider
+				if providerName == cfg.LLM.DefaultProvider {
+					defaultProvider = provider
+				}
+			}
+
+		default:
+			logger.Warn("unknown provider, skipping", "provider", providerName)
 		}
 	}
 
@@ -85,8 +103,19 @@ func runForeground() {
 			EncryptKey:        fmt.Sprintf("%v", feishuCfg["encrypt_key"]),
 		})
 		feishu.SetEngine(engine)
+
+		// Set the default provider for Feishu
+		if defaultProvider != nil {
+			feishu.SetProvider(defaultProvider)
+			logger.Info("set default provider for Feishu", "provider", cfg.LLM.DefaultProvider)
+		} else {
+			logger.Warn("no default provider available for Feishu")
+		}
+
 		if err := pm.LoadPlugin("feishu", feishu); err != nil {
 			logger.Error("failed to load Feishu plugin", "error", err)
+		} else {
+			logger.Info("Feishu bot enabled")
 		}
 	}
 
@@ -106,6 +135,7 @@ func runForeground() {
 		"host", cfg.Server.Host,
 		"port", cfg.Server.Port,
 	)
+	logger.Info("Ready to receive messages")
 
 	// Wait for shutdown signal
 	sigChan := make(chan os.Signal, 1)

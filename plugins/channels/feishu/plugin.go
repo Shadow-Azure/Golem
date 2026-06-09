@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
@@ -26,13 +27,14 @@ type FeishuConfig struct {
 
 // FeishuPlugin implements the ChannelPlugin interface for Feishu messaging.
 type FeishuPlugin struct {
-	config  FeishuConfig
-	client  *lark.Client
-	wsCli   *larkws.Client
-	engine  core.EngineInterface
-	logger  *slog.Logger
-	dedup   *Deduplicator
-	started bool
+	config   FeishuConfig
+	client   *lark.Client
+	wsCli    *larkws.Client
+	engine   core.EngineInterface
+	provider plugin.ProviderPlugin
+	logger   *slog.Logger
+	dedup    *Deduplicator
+	started  bool
 }
 
 // NewFeishuPlugin creates a new FeishuPlugin with the given configuration.
@@ -56,7 +58,7 @@ func (p *FeishuPlugin) Initialize(config map[string]interface{}) error {
 	p.client = lark.NewClient(p.config.AppID, p.config.AppSecret)
 
 	// Create event handler
-	eventHandler := dispatcher.NewEventDispatcherHandler(p.config.VerificationToken, p.config.EncryptKey)
+	eventHandler := dispatcher.NewEventDispatcher(p.config.VerificationToken, p.config.EncryptKey)
 	eventHandler.OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
 		return p.handleMessage(ctx, event)
 	})
@@ -117,7 +119,52 @@ func (p *FeishuPlugin) GetChannelType() string {
 // SendMessage sends a message through the Feishu channel.
 func (p *FeishuPlugin) SendMessage(sessionID string, content string) error {
 	p.logger.Info("sending message", "session_id", sessionID)
-	// TODO: Implement actual message sending via Feishu API
+
+	// Parse session ID to get receive_id
+	// Format: "feishu:ou_xxxx" (p2p) or "feishu:group:oc_xxxx:ou_xxxx" (group)
+	receiveID := ""
+	receiveIDType := "open_id"
+
+	if len(sessionID) > 7 && sessionID[:7] == "feishu:" {
+		parts := splitSessionID(sessionID)
+		if len(parts) == 2 {
+			// p2p: feishu:ou_xxxx
+			receiveID = parts[1]
+			receiveIDType = "open_id"
+		} else if len(parts) == 4 && parts[1] == "group" {
+			// group: feishu:group:oc_xxxx:ou_xxxx
+			receiveID = parts[2]
+			receiveIDType = "chat_id"
+		}
+	}
+
+	if receiveID == "" {
+		return fmt.Errorf("invalid session ID: %s", sessionID)
+	}
+
+	// Build message request
+	req := larkim.NewCreateMessageReqBuilder().
+		ReceiveIdType(receiveIDType).
+		Body(larkim.NewCreateMessageReqBodyBuilder().
+			ReceiveId(receiveID).
+			MsgType("text").
+			Content(fmt.Sprintf(`{"text":"%s"}`, escapeJSON(content))).
+			Build()).
+		Build()
+
+	// Send message
+	resp, err := p.client.Im.Message.Create(context.Background(), req)
+	if err != nil {
+		p.logger.Error("failed to send message", "error", err)
+		return fmt.Errorf("failed to send message: %w", err)
+	}
+
+	if !resp.Success() {
+		p.logger.Error("failed to send message", "code", resp.Code, "msg", resp.Msg)
+		return fmt.Errorf("failed to send message: %s", resp.Msg)
+	}
+
+	p.logger.Info("message sent successfully", "session_id", sessionID)
 	return nil
 }
 
@@ -133,13 +180,18 @@ func (p *FeishuPlugin) SetEngine(engine core.EngineInterface) {
 	p.engine = engine
 }
 
+// SetProvider sets the LLM provider for the plugin.
+func (p *FeishuPlugin) SetProvider(provider plugin.ProviderPlugin) {
+	p.provider = provider
+}
+
 // handleMessage handles incoming Feishu messages.
 func (p *FeishuPlugin) handleMessage(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
 	// Extract message info
-	msgID := event.Event.Message.MessageId
-	chatID := event.Event.Message.ChatId
-	chatType := event.Event.Message.ChatType
-	senderID := event.Event.Sender.SenderId.OpenId
+	msgID := derefString(event.Event.Message.MessageId)
+	chatID := derefString(event.Event.Message.ChatId)
+	chatType := derefString(event.Event.Message.ChatType)
+	senderID := derefString(event.Event.Sender.SenderId.OpenId)
 
 	p.logger.Info("received message",
 		"msg_id", msgID,
@@ -157,8 +209,7 @@ func (p *FeishuPlugin) handleMessage(ctx context.Context, event *larkim.P2Messag
 	// Extract text content
 	content := ""
 	if event.Event.Message.Content != nil {
-		// Parse JSON content to get text
-		content = *event.Event.Message.Content
+		content = derefString(event.Event.Message.Content)
 	}
 
 	// Generate session ID
@@ -180,19 +231,17 @@ func (p *FeishuPlugin) handleMessage(ctx context.Context, event *larkim.P2Messag
 		Content: content,
 	})
 
-	// Get LLM provider
-	providerName := p.engine.GetConfig().LLM.DefaultProvider
-	provider, exists := p.engine.GetPluginManager().GetProvider(providerName)
-	if !exists {
-		p.logger.Error("provider not found", "provider", providerName)
-		return fmt.Errorf("provider not found: %s", providerName)
-	}
-
 	// Get session history
 	history, _ := p.engine.GetSessionManager().GetHistory(session.ID, 50)
 
+	// Check if provider is set
+	if p.provider == nil {
+		p.logger.Error("no LLM provider configured")
+		return fmt.Errorf("no LLM provider configured")
+	}
+
 	// Call LLM
-	response, err := provider.Chat(ctx, history, core.ChatConfig{})
+	response, err := p.provider.Chat(ctx, history, core.ChatConfig{})
 	if err != nil {
 		p.logger.Error("LLM error", "error", err)
 		return err
@@ -206,6 +255,42 @@ func (p *FeishuPlugin) handleMessage(ctx context.Context, event *larkim.P2Messag
 
 	// Send response back to Feishu
 	return p.SendMessage(sessionID, response.Content)
+}
+
+// derefString safely dereferences a string pointer.
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// splitSessionID splits session ID into parts.
+func splitSessionID(sessionID string) []string {
+	parts := []string{}
+	current := ""
+	for _, c := range sessionID {
+		if c == ':' {
+			parts = append(parts, current)
+			current = ""
+		} else {
+			current += string(c)
+		}
+	}
+	if current != "" {
+		parts = append(parts, current)
+	}
+	return parts
+}
+
+// escapeJSON escapes special characters in JSON string.
+func escapeJSON(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "\"", "\\\"")
+	s = strings.ReplaceAll(s, "\n", "\\n")
+	s = strings.ReplaceAll(s, "\r", "\\r")
+	s = strings.ReplaceAll(s, "\t", "\\t")
+	return s
 }
 
 // Ensure FeishuPlugin implements plugin.ChannelPlugin.
