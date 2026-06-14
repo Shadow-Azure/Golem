@@ -3,6 +3,8 @@ package openai
 import (
 	"strings"
 	"testing"
+
+	"github.com/Shadow-Azure/Golem/internal/core"
 )
 
 func TestStreamParser_Parse(t *testing.T) {
@@ -171,5 +173,147 @@ func TestThinkingFilter_ContentAfterPartialClosingTag(t *testing.T) {
 	result3 := filter.Filter("\n</think>\n\nFinal content")
 	if result3 != "\n\nFinal content" {
 		t.Errorf("expected '\\n\\nFinal content', got '%s'", result3)
+	}
+}
+
+// Additional boundary condition tests for StreamParser
+
+func TestStreamParser_InvalidJSON(t *testing.T) {
+	input := "data: {invalid json}\n\ndata: [DONE]\n"
+	parser := NewStreamParser(strings.NewReader(input))
+
+	var chunks []core.StreamChunk
+	for chunk := range parser.Parse() {
+		chunks = append(chunks, chunk)
+	}
+
+	// Should have only the DONE chunk (invalid JSON is skipped)
+	if len(chunks) != 1 || !chunks[0].Done {
+		t.Errorf("expected 1 DONE chunk, got %v", chunks)
+	}
+}
+
+func TestStreamParser_EmptyChoices(t *testing.T) {
+	input := "data: {\"id\":\"1\",\"choices\":[]}\n\ndata: [DONE]\n"
+	parser := NewStreamParser(strings.NewReader(input))
+
+	var chunks []core.StreamChunk
+	for chunk := range parser.Parse() {
+		chunks = append(chunks, chunk)
+	}
+
+	// Should have only the DONE chunk (empty choices is skipped)
+	if len(chunks) != 1 || !chunks[0].Done {
+		t.Errorf("expected 1 DONE chunk, got %v", chunks)
+	}
+}
+
+func TestStreamParser_EmptyDeltaContent(t *testing.T) {
+	input := "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"\"}}]}\n\ndata: [DONE]\n"
+	parser := NewStreamParser(strings.NewReader(input))
+
+	var chunks []core.StreamChunk
+	for chunk := range parser.Parse() {
+		chunks = append(chunks, chunk)
+	}
+
+	// Should have only the DONE chunk (empty content is skipped)
+	if len(chunks) != 1 || !chunks[0].Done {
+		t.Errorf("expected 1 DONE chunk, got %v", chunks)
+	}
+}
+
+func TestStreamParser_SSEComments(t *testing.T) {
+	input := ": This is a comment\n\ndata: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\ndata: [DONE]\n"
+	parser := NewStreamParser(strings.NewReader(input))
+
+	var contents []string
+	for chunk := range parser.Parse() {
+		if chunk.Error != nil {
+			t.Fatalf("unexpected error: %v", chunk.Error)
+		}
+		if chunk.Done {
+			break
+		}
+		contents = append(contents, chunk.Content)
+	}
+
+	if len(contents) != 1 || contents[0] != "Hello" {
+		t.Errorf("expected ['Hello'], got %v", contents)
+	}
+}
+
+func TestStreamParser_NoDoneMarker(t *testing.T) {
+	input := "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n"
+	parser := NewStreamParser(strings.NewReader(input))
+
+	var contents []string
+	for chunk := range parser.Parse() {
+		if chunk.Error != nil {
+			t.Fatalf("unexpected error: %v", chunk.Error)
+		}
+		contents = append(contents, chunk.Content)
+	}
+
+	if len(contents) != 1 || contents[0] != "Hello" {
+		t.Errorf("expected ['Hello'], got %v", contents)
+	}
+}
+
+func TestStreamParser_MultipleChunks(t *testing.T) {
+	input := "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"He\"}}]}\n\ndata: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"llo\"}}]}\n\ndata: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\" World\"}}]}\n\ndata: [DONE]\n"
+	parser := NewStreamParser(strings.NewReader(input))
+
+	var contents []string
+	for chunk := range parser.Parse() {
+		if chunk.Error != nil {
+			t.Fatalf("unexpected error: %v", chunk.Error)
+		}
+		if chunk.Done {
+			break
+		}
+		contents = append(contents, chunk.Content)
+	}
+
+	expected := []string{"He", "llo", " World"}
+	if len(contents) != len(expected) {
+		t.Fatalf("expected %d chunks, got %d", len(expected), len(contents))
+	}
+	for i, c := range contents {
+		if c != expected[i] {
+			t.Errorf("chunk[%d] = %q, want %q", i, c, expected[i])
+		}
+	}
+}
+
+// Additional boundary condition tests for ThinkingFilter
+
+func TestThinkingFilter_AllThinking(t *testing.T) {
+	filter := NewThinkingFilter()
+	result := filter.Filter("<think>\nall content is thinking\n</think>")
+	if result != "" {
+		t.Errorf("expected empty, got '%q'", result)
+	}
+}
+
+func TestThinkingFilter_MultiplePartialTags(t *testing.T) {
+	filter := NewThinkingFilter()
+
+	// Send partial tag
+	result1 := filter.Filter("Hello <th")
+	if result1 != "Hello " {
+		t.Errorf("expected 'Hello ', got '%q'", result1)
+	}
+
+	// Send another partial tag (simulating chunk boundary)
+	result2 := filter.Filter("ink")
+	if result2 != "" {
+		t.Errorf("expected empty, got '%q'", result2)
+	}
+
+	// Complete the tag
+	result3 := filter.Filter(">thinking</think>\n\nWorld")
+	if result3 != "\n\nWorld" {
+		t.Errorf("expected '\\n\\nWorld', got '%q'", result3)
 	}
 }

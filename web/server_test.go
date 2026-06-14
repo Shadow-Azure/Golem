@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Shadow-Azure/Golem/internal/config"
@@ -344,4 +345,131 @@ func TestGetAddr(t *testing.T) {
 	if srv.GetAddr() != ":8080" {
 		t.Errorf("expected ':8080', got '%s'", srv.GetAddr())
 	}
+}
+
+// --- Stream Handler Tests ---
+
+func TestHandleStream_Success(t *testing.T) {
+	provider := &mockProvider{response: "Hello from AI"}
+	srv := newTestServer(provider)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/stream?message=Hi", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleStream(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	// Check SSE headers
+	if w.Header().Get("Content-Type") != "text/event-stream" {
+		t.Errorf("expected Content-Type 'text/event-stream', got '%s'", w.Header().Get("Content-Type"))
+	}
+
+	// Check response body contains SSE data
+	body := w.Body.String()
+	if !strings.Contains(body, "data:") {
+		t.Errorf("expected SSE data in response, got: %s", body)
+	}
+}
+
+func TestHandleStream_MethodNotAllowed(t *testing.T) {
+	srv := newTestServer(&mockProvider{})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/stream?message=Hi", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleStream(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestHandleStream_EmptyMessage(t *testing.T) {
+	srv := newTestServer(&mockProvider{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/stream", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleStream(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	// Should contain error SSE message
+	body := w.Body.String()
+	if !strings.Contains(body, "error") {
+		t.Errorf("expected error in SSE response, got: %s", body)
+	}
+}
+
+func TestHandleStream_StreamingProvider(t *testing.T) {
+	// Create a provider that supports streaming
+	provider := &mockStreamingProvider{response: "Hello from AI"}
+	srv := newTestServerWithStreaming(provider)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/stream?message=Hi", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleStream(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	body := w.Body.String()
+	// Check that streaming chunks are present
+	if !strings.Contains(body, "Hello") {
+		t.Errorf("expected 'Hello' in response, got: %s", body)
+	}
+	if !strings.Contains(body, "from AI") {
+		t.Errorf("expected 'from AI' in response, got: %s", body)
+	}
+	if !strings.Contains(body, "done") {
+		t.Errorf("expected 'done' in response, got: %s", body)
+	}
+}
+
+// mockStreamingProvider implements plugin.ProviderPlugin with streaming support.
+type mockStreamingProvider struct {
+	response string
+}
+
+var _ plugin.ProviderPlugin = (*mockStreamingProvider)(nil)
+
+func (m *mockStreamingProvider) Name() string                              { return "mock-streaming" }
+func (m *mockStreamingProvider) Version() string                           { return "0.1.0" }
+func (m *mockStreamingProvider) Initialize(_ map[string]interface{}) error { return nil }
+func (m *mockStreamingProvider) Start() error                              { return nil }
+func (m *mockStreamingProvider) Stop() error                               { return nil }
+func (m *mockStreamingProvider) HealthCheck() plugin.HealthStatus {
+	return plugin.HealthStatus{Healthy: true, Message: "ok"}
+}
+func (m *mockStreamingProvider) GetProviderType() string { return "mock-streaming" }
+func (m *mockStreamingProvider) SupportsStreaming() bool { return true }
+
+func (m *mockStreamingProvider) Chat(_ context.Context, _ []core.Message, _ core.ChatConfig) (*core.ChatResponse, error) {
+	return &core.ChatResponse{
+		Content: m.response,
+		Usage:   core.Usage{},
+	}, nil
+}
+
+func (m *mockStreamingProvider) ChatStream(_ context.Context, _ []core.Message, _ core.ChatConfig) (<-chan core.StreamChunk, error) {
+	ch := make(chan core.StreamChunk, 3)
+	ch <- core.StreamChunk{Content: "Hello"}
+	ch <- core.StreamChunk{Content: " from AI"}
+	ch <- core.StreamChunk{Done: true}
+	close(ch)
+	return ch, nil
+}
+
+// newTestServerWithStreaming creates a Server with a streaming provider.
+func newTestServerWithStreaming(provider *mockStreamingProvider) *Server {
+	cfg := config.DefaultConfig()
+	engine, _ := core.NewEngine(cfg)
+	return NewServer(engine, provider, ":0")
 }
