@@ -121,34 +121,34 @@ func TestStripThinkingTags(t *testing.T) {
 
 func TestNewProvider_DefaultValues(t *testing.T) {
 	tests := []struct {
-		name           string
-		config         ProviderConfig
-		expectedBase   string
-		expectedModel  string
+		name          string
+		config        ProviderConfig
+		expectedBase  string
+		expectedModel string
 	}{
 		{
-			name:           "empty config uses defaults",
-			config:         ProviderConfig{APIKey: "test"},
-			expectedBase:   "https://api.openai.com/v1",
-			expectedModel:  "gpt-4o",
+			name:          "empty config uses defaults",
+			config:        ProviderConfig{APIKey: "test"},
+			expectedBase:  "https://api.openai.com/v1",
+			expectedModel: "gpt-4o",
 		},
 		{
-			name:           "custom base URL",
-			config:         ProviderConfig{APIKey: "test", BaseURL: "https://custom.api.com/v1"},
-			expectedBase:   "https://custom.api.com/v1",
-			expectedModel:  "gpt-4o",
+			name:          "custom base URL",
+			config:        ProviderConfig{APIKey: "test", BaseURL: "https://custom.api.com/v1"},
+			expectedBase:  "https://custom.api.com/v1",
+			expectedModel: "gpt-4o",
 		},
 		{
-			name:           "custom model",
-			config:         ProviderConfig{APIKey: "test", Model: "gpt-3.5-turbo"},
-			expectedBase:   "https://api.openai.com/v1",
-			expectedModel:  "gpt-3.5-turbo",
+			name:          "custom model",
+			config:        ProviderConfig{APIKey: "test", Model: "gpt-3.5-turbo"},
+			expectedBase:  "https://api.openai.com/v1",
+			expectedModel: "gpt-3.5-turbo",
 		},
 		{
-			name:           "all custom values",
-			config:         ProviderConfig{APIKey: "test", BaseURL: "https://custom.api.com/v1", Model: "gpt-4"},
-			expectedBase:   "https://custom.api.com/v1",
-			expectedModel:  "gpt-4",
+			name:          "all custom values",
+			config:        ProviderConfig{APIKey: "test", BaseURL: "https://custom.api.com/v1", Model: "gpt-4"},
+			expectedBase:  "https://custom.api.com/v1",
+			expectedModel: "gpt-4",
 		},
 	}
 
