@@ -329,6 +329,16 @@ else
 fi
 echo -e "${GREEN}Documentation ready: release/docs/${NC}"
 
+# Step 8.5: Copy web static files
+echo -e "${YELLOW}Step 8.5: Copying web static files...${NC}"
+if [ -d "web/static" ]; then
+    mkdir -p release/web/static
+    cp -r web/static/* release/web/static/
+    echo -e "${GREEN}Copied: release/web/static/${NC}"
+else
+    echo -e "${YELLOW}Warning: web/static/ not found, skipping...${NC}"
+fi
+
 # Step 9: Build WebChat UI (if pnpm available)
 echo -e "${YELLOW}Step 9: Building WebChat UI...${NC}"
 if command -v pnpm &> /dev/null; then

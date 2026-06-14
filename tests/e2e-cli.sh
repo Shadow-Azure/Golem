@@ -88,7 +88,7 @@ echo ""
 echo -e "${YELLOW}=== Test Suite: Status Command ===${NC}"
 
 run_test "status command (not running)" 0 $GOLEM status
-if echo "$OUTPUT" | grep -q "未运行"; then
+if echo "$OUTPUT" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "未运行"; then
     echo -e "${GREEN}  ✅ Status shows 'not running'${NC}"
 else
     echo -e "${RED}  ❌ Status should show 'not running'${NC}"
@@ -100,7 +100,7 @@ echo ""
 echo -e "${YELLOW}=== Test Suite: Stop Command ===${NC}"
 
 run_test "stop command (not running)" 0 $GOLEM stop
-if echo "$OUTPUT" | grep -q "未运行"; then
+if echo "$OUTPUT" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "未运行"; then
     echo -e "${GREEN}  ✅ Stop shows 'not running'${NC}"
 else
     echo -e "${RED}  ❌ Stop should show 'not running'${NC}"
